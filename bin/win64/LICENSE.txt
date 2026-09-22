@@ -1,0 +1,20 @@
+Third-party binaries bundled into LinkTest for Windows (64-bit)
+==============================================================
+
+iperf3.exe  -- iperf 3.21, https://github.com/esnet/iperf
+  Copyright (c) 2014-2025, The Regents of the University of California, through
+  Lawrence Berkeley National Laboratory (subject to receipt of any required
+  approvals from the U.S. Dept. of Energy). All rights reserved.
+  Licensed under the BSD 3-Clause License; full text:
+  https://github.com/esnet/iperf/blob/master/LICENSE
+  Windows build by ar51an: https://github.com/ar51an/iperf3-win-builds
+
+cygwin1.dll -- Cygwin runtime, https://cygwin.com
+  Copyright (C) Cygwin authors. Licensed under the GNU Lesser General Public
+  License v3 (with Cygwin's linking exception). Full text:
+  https://cygwin.com/COPYING.LIB
+  Source code: https://cygwin.com/git/ (the DLL is unmodified; replacing it with
+  another build of cygwin1.dll of the same major version is supported).
+
+LinkTest itself contains no code from either project; it runs iperf3.exe as a
+separate process and reads its output.

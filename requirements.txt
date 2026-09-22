@@ -1,0 +1,9 @@
+# Runtime + build requirements for the native-window app.
+# Running `python linktest.py --browser` needs nothing beyond the standard library.
+pywebview==6.2.1
+pythonnet>=3.1.0 ; sys_platform == "win32"
+qtpy>=2.4 ; sys_platform == "linux"
+PySide6==6.11.2 ; sys_platform == "linux"
+# macOS: pywebview pulls pyobjc-core/Cocoa/WebKit/Quartz/Security itself; CoreWLAN is for the Wi-Fi tab.
+pyobjc-framework-CoreWLAN>=9.0 ; sys_platform == "darwin"
+pyinstaller>=6.22

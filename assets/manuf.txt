@@ -1,0 +1,4 @@
+Wireshark manuf MAC vendor table, fetched 2026-09-10
+source: https://www.wireshark.org/download/automated/data/manuf
+entries: 58195
+licence: GPL-2.0 (data file; attribution in THIRD-PARTY-LICENSES.txt)

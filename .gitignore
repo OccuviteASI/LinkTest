@@ -1,0 +1,10 @@
+__pycache__/
+build/
+dist/
+*.spec
+bin/*/iperf3*
+bin/*/*.dll
+tools/fake/
+tools/fake-build/
+.venv/
+*.log

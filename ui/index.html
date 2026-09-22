@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkTest</title>
+<link rel="stylesheet" href="/ui/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b6ef5'/%3E%3Cpath d='M7 20l5-8 4 6 3-4 6 8' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b6ef5"/><path d="M7 20l5-8 4 6 3-4 6 8" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div>
+      <h1>LinkTest</h1>
+      <p>Easy network testing: speed, scan, ping, DNS</p>
+    </div>
+  </div>
+  <div class="top-right">
+    <span id="enginePill" class="pill pill-muted" title="The iperf3 engine LinkTest uses">iperf3: checking…</span>
+    <button id="verPill" class="pill pill-muted verpill" title="What's new in this version">v…</button>
+    <button id="btnAbout" class="icon-btn" title="About LinkTest">?</button>
+  </div>
+</header>
+
+<main>
+
+<nav class="tabs" id="tabs" aria-label="Tools">
+  <button data-tab="speed" class="on">Speed test</button>
+  <button data-tab="scan">Scan network</button>
+  <button data-tab="pings">Ping monitor</button>
+  <button data-tab="dns">DNS lookup</button>
+  <button data-tab="capture">Packet capture</button>
+  <button data-tab="wifi">Wi‑Fi</button>
+</nav>
+
+<section id="tab-speed" class="tab">
+
+  <!-- One-time setup -->
+  <section id="setupCard" class="card setup hidden">
+    <h2>Setup needed</h2>
+    <p>LinkTest ships with the measuring engine, <b>iperf3</b>, built in, but it could not be started on this computer.</p>
+    <div id="setupWhy" class="error hidden"></div>
+    <details class="sub" open>
+      <summary>I already have iperf3 somewhere</summary>
+      <div class="row wrap">
+        <input id="iperfPathInput" type="text" placeholder="C:\Tools\iperf3\iperf3.exe" spellcheck="false">
+        <button id="btnUsePath" class="btn">Use this file</button>
+      </div>
+      <div id="pathError" class="error hidden"></div>
+    </details>
+  </section>
+
+  <!-- Mode -->
+  <section class="modes" id="modes">
+    <label class="mode-card">
+      <input type="radio" name="mode" value="client" checked>
+      <div class="mode-body">
+        <div class="mode-icon">⇄</div>
+        <div>
+          <b>Test my connection</b>
+          <span>Measure the speed between this computer and another one that is waiting for tests.</span>
+        </div>
+      </div>
+    </label>
+    <label class="mode-card">
+      <input type="radio" name="mode" value="server">
+      <div class="mode-body">
+        <div class="mode-icon">◎</div>
+        <div>
+          <b>Be the test target</b>
+          <span>Wait here and let another computer running LinkTest (or iperf3) test against this one.</span>
+        </div>
+      </div>
+    </label>
+  </section>
+
+  <div class="layout">
+  <div class="col-left">
+
+  <!-- CLIENT FORM -->
+  <section id="clientForm" class="card">
+    <div class="presets" id="presets">
+      <span class="presets-label">Quick picks</span>
+      <button class="chip" data-preset="quick">Quick check</button>
+      <button class="chip" data-preset="max">Max out the link</button>
+      <button class="chip" data-preset="both">Both directions</button>
+      <button class="chip" data-preset="voice">Voice &amp; video quality</button>
+    </div>
+
+    <div class="field">
+      <label for="host">Address of the other computer</label>
+      <input id="host" type="text" list="hostList" placeholder="for example 192.168.1.20 or lab-pc" spellcheck="false" autocomplete="off">
+      <datalist id="hostList"></datalist>
+      <div id="recentHosts" class="mini-chips recent hidden"></div>
+      <div class="row wrap" style="margin-top:6px">
+        <select id="publicServers" style="width:auto;max-width:100%"><option value="">Or pick a public test server (USA)…</option></select>
+        <span id="publicHint" class="hint"></span>
+      </div>
+      <div class="hint">The other computer must be in <b>Be the test target</b> mode. Its LinkTest screen shows the address to type here. Public servers measure your internet connection instead; they are shared and come and go, so if one is busy try another.</div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Direction</label>
+        <div class="seg" id="direction">
+          <button data-v="upload" class="on" title="This computer sends data to the other one">Send ↑</button>
+          <button data-v="download" title="This computer receives data from the other one">Receive ↓</button>
+          <button data-v="both" title="Send and receive at the same time">Both at once</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Type of test</label>
+        <div class="seg" id="protocol">
+          <button data-v="tcp" class="on" title="Finds the maximum reliable speed, like a file copy">Speed (TCP)</button>
+          <button data-v="udp" title="Sends at a fixed rate and checks for lost packets and jitter, like a call or video stream">Quality (UDP)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="duration">How long</label>
+        <div class="row">
+          <input id="duration" type="number" min="1" max="86400" value="10" style="width:6em"> <span class="unit">seconds</span>
+          <span class="mini-chips"><button data-d="5">5</button><button data-d="10">10</button><button data-d="30">30</button><button data-d="60">60</button></span>
+        </div>
+      </div>
+      <div class="field">
+        <label for="parallel">Connections at once</label>
+        <div class="row">
+          <input id="parallel" type="number" min="1" max="128" value="1" style="width:6em">
+          <span class="hint">One is normal. Use 4–8 to fill a very fast link.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="field" id="bitrateField">
+      <label for="bitrate">Target speed <span class="soft">(UDP)</span></label>
+      <div class="row">
+        <input id="bitrate" type="text" value="100M" style="width:8em" spellcheck="false">
+        <span class="hint">How fast to send, e.g. <code>10M</code> for a video call, <code>100M</code>, <code>1G</code>. <code>0</code> means as fast as possible.</span>
+      </div>
+    </div>
+
+    <details class="adv" id="advClient">
+      <summary>Advanced options</summary>
+      <div class="grid3">
+        <div class="field"><label for="port">Port</label><input id="port" type="number" min="1" max="65535" value="5201"><div class="hint">Must match the other side.</div></div>
+        <div class="field"><label for="omit">Warm-up seconds to ignore</label><input id="omit" type="number" min="0" max="60" value="0"><div class="hint">Skips the slow start (-O).</div></div>
+        <div class="field"><label for="interval">Report every</label><input id="interval" type="number" min="0.1" step="0.1" value="1"><div class="hint">seconds (-i)</div></div>
+      </div>
+      <div class="field">
+        <label>Amount to send</label>
+        <div class="row wrap">
+          <label class="radio"><input type="radio" name="amount" value="time" checked> For the duration above</label>
+          <label class="radio"><input type="radio" name="amount" value="bytes"> A fixed amount of data <input id="bytes" type="text" placeholder="500M" style="width:6em"></label>
+          <label class="radio"><input type="radio" name="amount" value="blocks"> A number of blocks <input id="blocks" type="text" placeholder="1000" style="width:6em"></label>
+        </div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label for="window">Socket buffer / window</label><input id="window" type="text" placeholder="e.g. 4M"><div class="hint">-w</div></div>
+        <div class="field"><label for="length">Read/write block size</label><input id="length" type="text" placeholder="e.g. 128K or 1400"><div class="hint">-l (UDP packet size)</div></div>
+        <div class="field"><label for="mss">TCP segment size</label><input id="mss" type="number" placeholder="e.g. 1400"><div class="hint">-M</div></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label for="bind">Use this local address</label><input id="bind" type="text" placeholder="leave empty for automatic"><div class="hint">-B, picks a network card</div></div>
+        <div class="field"><label for="ipver">IP version</label><select id="ipver"><option value="auto">Automatic</option><option value="4">IPv4 only</option><option value="6">IPv6 only</option></select></div>
+        <div class="field"><label for="cport">Local port</label><input id="cport" type="number" placeholder="automatic"><div class="hint">--cport</div></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label for="dscp">DSCP marking</label><input id="dscp" type="text" placeholder="e.g. EF, AF41 or 46"><div class="hint">--dscp (QoS priority)</div></div>
+        <div class="field"><label for="tos">TOS byte</label><input id="tos" type="text" placeholder="e.g. 0xb8"><div class="hint">-S, ignored if DSCP is set</div></div>
+        <div class="field"><label for="connectTimeout">Give up connecting after</label><input id="connectTimeout" type="number" placeholder="e.g. 5"><div class="hint">seconds (--connect-timeout)</div></div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="nodelay"> No delay (disable Nagle, TCP)</label>
+        <label><input type="checkbox" id="zerocopy"> Zero-copy sending (-Z)</label>
+        <label><input type="checkbox" id="getServerOutput"> Also fetch the other side's report</label>
+        <label><input type="checkbox" id="repeatingPayload"> Repeating payload instead of random data</label>
+        <label><input type="checkbox" id="dontFragment"> Don't fragment (UDP)</label>
+        <label><input type="checkbox" id="udp64"> 64-bit packet counters (UDP)</label>
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="congestion">Congestion control (Linux only)</label><input id="congestion" type="text" placeholder="e.g. cubic, bbr"></div>
+        <div class="field"><label for="title">Label for this test</label><input id="title" type="text" placeholder="e.g. Office Wi-Fi"></div>
+      </div>
+      <div class="field"><label for="extraArgs">Extra iperf3 arguments</label><input id="extraArgs" type="text" placeholder="anything else, passed straight to iperf3" spellcheck="false"></div>
+    </details>
+  </section>
+
+  <!-- SERVER FORM -->
+  <section id="serverForm" class="card hidden">
+    <h2>Tell the other person to type one of these addresses</h2>
+    <div id="addrList" class="addr-list"></div>
+    <div class="hint">Your computer's name is <b id="hostName">…</b>. Usually the first address is the right one. Click an address to copy it.</div>
+
+    <div class="grid2" style="margin-top:14px">
+      <div class="field">
+        <label for="sport">Port</label>
+        <input id="sport" type="number" min="1" max="65535" value="5201" style="width:7em">
+        <div class="hint">Leave at 5201 unless the other side changed it.</div>
+      </div>
+      <div class="field hidden" id="fwField">
+        <label id="fwLabel">Firewall</label>
+        <div class="row wrap">
+          <button id="btnFirewall" class="btn">Allow through the firewall</button>
+          <span id="fwStatus" class="hint">Needed once so other computers can reach this one.</span>
+        </div>
+        <pre id="fwManual" class="hidden"></pre>
+        <button id="fwCopy" class="btn small hidden" style="margin-top:6px">Copy commands</button>
+      </div>
+    </div>
+
+    <details class="adv" id="advServer">
+      <summary>Advanced options</summary>
+      <div class="grid3">
+        <div class="field"><label for="sinterval">Report every</label><input id="sinterval" type="number" min="0.1" step="0.1" value="1"><div class="hint">seconds</div></div>
+        <div class="field"><label for="sbind">Listen on this address only</label><input id="sbind" type="text" placeholder="all addresses"></div>
+        <div class="field"><label for="sipver">IP version</label><select id="sipver"><option value="auto">Automatic</option><option value="4">IPv4 only</option><option value="6">IPv6 only</option></select></div>
+      </div>
+      <div class="grid3">
+        <div class="field"><label for="idleTimeout">Restart if stuck for</label><input id="idleTimeout" type="number" placeholder="e.g. 60"><div class="hint">seconds (--idle-timeout)</div></div>
+        <div class="field"><label for="serverBitrateLimit">Refuse tests faster than</label><input id="serverBitrateLimit" type="text" placeholder="e.g. 1G"><div class="hint">--server-bitrate-limit</div></div>
+        <div class="field"><label for="sextraArgs">Extra iperf3 arguments</label><input id="sextraArgs" type="text" spellcheck="false"></div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="oneOff"> Stop after one test</label>
+      </div>
+    </details>
+  </section>
+
+  <!-- Start / stop -->
+  <section class="card run">
+    <button id="btnStart" class="btn primary big">Start test</button>
+    <div id="formError" class="error hidden"></div>
+    <details class="cmd">
+      <summary>Show the iperf3 command this runs</summary>
+      <div class="row"><code id="cmdLine"></code><button id="btnCopyCmd" class="btn small">Copy</button></div>
+    </details>
+  </section>
+
+  </div><!-- /col-left -->
+
+  <div class="col-right">
+
+  <!-- Live / results -->
+  <section id="livePanel" class="card live hidden">
+    <div class="live-head">
+      <div id="liveStatus" class="status">Idle</div>
+      <div id="liveTimer" class="timer"></div>
+    </div>
+    <div class="bignum"><span id="liveSpeed">—</span><span id="liveSpeedUnit"></span></div>
+    <div id="liveSub" class="live-sub"></div>
+    <canvas id="chart" height="220"></canvas>
+    <div id="legend" class="legend"></div>
+    <div class="tiles" id="liveTiles"></div>
+  </section>
+
+  <section id="resultPanel" class="card result hidden">
+    <div class="verdict">
+      <div id="verdictIcon" class="verdict-icon">✓</div>
+      <div>
+        <h2 id="verdictTitle">Test finished</h2>
+        <p id="verdictText"></p>
+      </div>
+    </div>
+    <div class="tiles" id="resultTiles"></div>
+    <div id="resultNotes" class="notes"></div>
+    <div class="row wrap actions">
+      <button id="btnAgain" class="btn primary">Run again</button>
+      <button id="btnCopySummary" class="btn">Copy summary</button>
+      <button id="btnCsv" class="btn">Save as CSV</button>
+      <button id="btnJson" class="btn">Save full report</button>
+    </div>
+    <details class="raw">
+      <summary>Raw iperf3 output</summary>
+      <pre id="rawLog"></pre>
+    </details>
+  </section>
+
+  <section id="serverLog" class="card hidden">
+    <h2>Tests received so far</h2>
+    <div id="serverResults" class="server-results"><p class="hint">No tests yet. When another computer runs a test against this one, it shows up here.</p></div>
+  </section>
+
+  <section class="card history">
+    <div class="row between">
+      <h2>Past tests</h2>
+      <button id="btnClearHistory" class="btn small">Clear</button>
+    </div>
+    <div id="historyList" class="history-list"><p class="hint">Results are kept here so you can compare over time.</p></div>
+  </section>
+
+  </div><!-- /col-right -->
+  </div><!-- /layout -->
+
+</section><!-- /tab-speed -->
+
+<!-- ===================== SCAN NETWORK ===================== -->
+<section id="tab-scan" class="tab hidden">
+  <section class="card" data-collapse="scan.settings">
+    <div class="row between wrap"><h2>Find the devices on your network</h2><span class="hint csum" id="scanSettingsSum"></span></div>
+    <div class="cbody">
+    <div class="grid2">
+      <div class="field">
+        <label for="scanRange">Addresses to scan</label>
+        <input id="scanRange" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 192.168.1.0/24 or 192.168.1.1-254">
+        <div class="row wrap" style="margin-top:6px">
+          <select id="scanNets" style="width:auto;max-width:100%"></select>
+          <button id="scanUseNet" class="btn small">Use this network</button>
+        </div>
+        <div class="hint" id="scanRangeHint">Your own network is filled in automatically.</div>
+      </div>
+      <div class="field">
+        <label for="scanPorts">Ports to check on each device</label>
+        <div class="row wrap" style="margin-bottom:6px">
+          <span class="seg small" id="portPresets"><button data-p="basic" title="A handful of the most common ports: quick">Basic</button><button data-p="standard" title="The usual services (28 ports)">Standard</button><button data-p="thorough" title="Every well-known port plus common extras: slow">Thorough</button><button data-p="custom" title="Clear the list and type your own ports">Custom</button></span>
+          <span class="hint" id="portPresetHint"></span>
+        </div>
+        <div class="row"><input id="scanPorts" type="text" spellcheck="false" autocomplete="off"></div>
+        <div id="portWarn" class="notes hidden"></div>
+        <div class="hint">Open ports show what a device offers: 80/443 web pages, 22 SSH, 3389 Remote Desktop, 445 Windows sharing, 5201 iperf3. Edit the list freely (ranges like 8000-8010 work).</div>
+      </div>
+    </div>
+    <details class="adv" id="advScan">
+      <summary>Advanced options</summary>
+      <div class="grid3">
+        <div class="field"><label for="scanTimeout">Wait for each reply</label><input id="scanTimeout" type="number" min="200" max="5000" step="100" value="1000"><div class="hint">milliseconds</div></div>
+        <div class="field"><label for="scanRetries">Retries for silent devices</label><input id="scanRetries" type="number" min="0" max="3" value="1"></div>
+        <div class="field"><label>Extras</label>
+          <div class="checks" style="grid-template-columns:1fr;margin:0">
+            <label><input type="checkbox" id="scanNames" checked> Look up device names</label>
+            <label><input type="checkbox" id="scanSilent" checked> Check ports even if pings are ignored</label>
+          </div>
+        </div>
+      </div>
+    </details>
+    <div class="row wrap" style="margin-top:8px">
+      <button id="scanStart" class="btn primary big" style="flex:1">Scan</button>
+    </div>
+    <div id="scanError" class="error hidden"></div>
+    <div id="scanProgress" class="progress hidden"><div class="bar"></div><span class="msg"></span></div>
+    <div id="scanNote" class="notes hidden" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <section class="card" data-collapse="scan.devices">
+    <div class="row between wrap">
+      <h2 id="scanTitle">Devices</h2>
+      <div class="row wrap">
+        <label class="radio"><input type="checkbox" id="scanAliveOnly" checked> Only devices that answered</label>
+        <button id="scanCsv" class="btn small">Save as CSV</button>
+      </div>
+    </div>
+    <div class="cbody">
+    <div id="scanSummary" class="hint"></div>
+    <div id="scanWarn" class="notes warn hidden"></div>
+    <div class="table-wrap">
+      <table class="table" id="scanTable">
+        <thead><tr>
+          <th data-k="ip" class="sortable">Address</th><th data-k="hostname" class="sortable">Name</th>
+          <th data-k="vendor" class="sortable">Made by</th><th data-k="rtt" class="sortable">Ping</th>
+          <th data-k="ports" class="sortable">Open ports</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="scanEmpty" class="hint">Press Scan to look for devices. A typical home or office network takes a few seconds.</p>
+    </div>
+  </section>
+
+  <section class="card" id="arpCard" data-collapse="scan.arp">
+    <div class="row between wrap">
+      <h2>Hardware addresses this computer knows (ARP)</h2>
+      <div class="row wrap"><input id="arpFilter" type="text" placeholder="filter…" style="width:11em"><button id="arpRefresh" class="btn small">Refresh</button><button id="arpCsv" class="btn small">Save as CSV</button></div>
+    </div>
+    <div class="cbody">
+    <div class="hint">Every device has a hardware (MAC) address burned in by its maker. Your computer remembers the ones it has talked to recently; scanning fills this list in. Use it to find what a MAC belongs to, or which hardware sits behind an IP.</div>
+    <div class="row wrap" style="margin-top:10px">
+      <input id="arpQ" type="text" placeholder="Look up a MAC (aa:bb:cc:dd:ee:ff) or an IP address" spellcheck="false" autocomplete="off" style="flex:1;min-width:260px">
+      <button id="arpGo" class="btn primary">Look up</button>
+    </div>
+    <div id="arpResult" class="wfconn hidden" style="display:block"></div>
+    <div class="arpcmds">
+      <h3>Commands</h3>
+      <div class="hint">The same commands a technician types, run for you. Ones marked <b>admin</b> show the Windows administrator prompt. A static entry pins an address until the next restart.</div>
+      <div class="cmdrow"><button class="btn small" data-cmd="show">Show table</button><code data-c="show"></code><button class="btn small ghost" data-copy="show" title="Copy command">Copy</button></div>
+      <div class="cmdrow"><button class="btn small" data-cmd="neighbors">Show neighbours</button><code data-c="neighbors"></code><button class="btn small ghost" data-copy="neighbors" title="Copy command">Copy</button></div>
+      <div class="cmdrow"><button class="btn small" data-cmd="flush">Clear cache <small>admin</small></button><code data-c="flush"></code><button class="btn small ghost" data-copy="flush" title="Copy command">Copy</button></div>
+      <div class="cmdrow"><input id="arpDelIp" type="text" placeholder="IP to delete" spellcheck="false" style="width:11em"><button class="btn small" data-cmd="delete">Delete entry <small>admin</small></button><code data-c="delete"></code><button class="btn small ghost" data-copy="delete" title="Copy command">Copy</button></div>
+      <div class="cmdrow"><input id="arpAddIp" type="text" placeholder="IP" spellcheck="false" style="width:9em"><input id="arpAddMac" type="text" placeholder="MAC aa-bb-cc-dd-ee-ff" spellcheck="false" style="width:13em"><button class="btn small" data-cmd="add">Add static entry <small>admin</small></button><code data-c="add"></code><button class="btn small ghost" data-copy="add" title="Copy command">Copy</button></div>
+      <div class="row between wrap" style="margin-top:8px"><span class="hint" id="arpOutHint"></span><button class="btn small hidden" id="arpOutCopy">Copy output</button></div>
+      <pre id="arpOut" class="hidden"></pre>
+    </div>
+    <h3 style="margin-top:14px">Known addresses</h3>
+    <div id="arpConflicts" class="notes warn hidden"></div>
+    <div class="table-wrap">
+      <table class="table" id="arpTable"><thead><tr><th>Address</th><th>MAC</th><th>Made by</th><th>Address type</th><th>Entry</th><th>Connection</th><th>Seen in scan</th></tr></thead><tbody></tbody></table>
+    </div>
+    <p id="arpEmpty" class="hint hidden">Nothing known yet. Run a scan or look up an address.</p>
+    </div>
+  </section>
+</section>
+
+<!-- ===================== PING MONITOR ===================== -->
+<section id="tab-pings" class="tab hidden">
+  <section class="card">
+    <div class="row between wrap"><h2>Watch addresses and services over time</h2><span class="mini-chips"><button id="pingCollapseAll">Collapse all</button><button id="pingExpandAll">Expand all</button></span></div>
+    <div class="row wrap">
+      <select id="pingKind" style="width:auto" title="What to check">
+        <option value="auto">Auto</option><option value="ping">Ping</option><option value="http">Web page</option><option value="tcp">Port</option>
+      </select>
+      <input id="pingHost" type="text" placeholder="Address, name, URL or host:port, e.g. 8.8.8.8, https://intranet, fileserver:445" spellcheck="false" autocomplete="off" style="flex:2;min-width:260px">
+      <input id="pingPort" type="number" min="1" max="65535" placeholder="Port" style="width:6.5em" class="hidden">
+      <input id="pingLabel" type="text" placeholder="Label (optional)" style="flex:1;min-width:140px">
+      <select id="pingInterval" style="width:auto">
+        <option value="1">Every second</option><option value="0.5">Twice a second</option><option value="2">Every 2 seconds</option>
+        <option value="5">Every 5 seconds</option><option value="10">Every 10 seconds</option><option value="30">Every 30 seconds</option>
+        <option value="60">Every minute</option><option value="300">Every 5 minutes</option>
+      </select>
+      <button id="pingAdd" class="btn primary">Watch</button>
+    </div>
+    <div class="hint" id="pingKindHint">Auto: a web address (https://…) checks the page, host:port checks that port, anything else is pinged. Web page and port checks work like Uptime Robot: up when the service answers, with response time and uptime %.</div>
+    <div id="pingError" class="error hidden"></div>
+    <div class="hint" style="margin-top:8px">Each address is checked continuously (ping, a web page, or a port) and its route is traced hop by hop, like PingPlotter: every router on the way gets its own row with reply times and loss, and the bottom chart is the address itself. LinkTest keeps <span id="pingRetention">30</span> days of history per address. A red card and a short sound mean the address stopped answering; it turns back when it recovers. Click a card's header to collapse it.</div>
+  </section>
+  <div id="pingCards"></div>
+  <p id="pingEmpty" class="hint" style="margin:0 4px 16px">Nothing is being watched yet. Add an address above, or use "Watch" next to a device in Scan network.</p>
+</section>
+
+<!-- ===================== DNS LOOKUP ===================== -->
+<section id="tab-dns" class="tab hidden">
+  <section class="card">
+    <h2>Look up a name</h2>
+    <div class="row wrap">
+      <input id="dnsName" type="text" placeholder="Name or address, e.g. example.com or 8.8.8.8" spellcheck="false" autocomplete="off" style="flex:2;min-width:240px">
+      <select id="dnsType" style="width:auto">
+        <option value="ALL">All common records</option><option value="A">A (IPv4 address)</option><option value="AAAA">AAAA (IPv6 address)</option>
+        <option value="CNAME">CNAME (alias)</option><option value="MX">MX (mail servers)</option><option value="NS">NS (name servers)</option>
+        <option value="TXT">TXT (text)</option><option value="SOA">SOA (zone info)</option><option value="SRV">SRV (service)</option>
+        <option value="CAA">CAA (certificate rules)</option><option value="PTR">PTR (reverse)</option>
+      </select>
+      <button id="dnsGo" class="btn primary">Look up</button>
+    </div>
+    <div class="row wrap" style="margin-top:10px">
+      <span class="presets-label">Ask</span>
+      <div id="dnsServers" class="presets" style="margin:0"></div>
+      <input id="dnsCustom" type="text" placeholder="another server, e.g. 10.0.0.1" spellcheck="false" style="width:15em">
+      <button id="dnsAddServer" class="btn small">Add</button>
+    </div>
+    <div id="dnsError" class="error hidden"></div>
+    <div class="hint" style="margin-top:8px">"This computer's" is whatever server your computer normally asks. Pick several to compare their answers side by side; rows that differ between servers are highlighted.</div>
+  </section>
+  <div id="dnsResults" class="dns-grid"></div>
+</section>
+
+<!-- ===================== PACKET CAPTURE ===================== -->
+<section id="tab-capture" class="tab hidden">
+  <section class="card" id="pcStartCard">
+    <h2>Record the traffic on a network connection</h2>
+    <div class="grid2">
+      <div class="field">
+        <label for="pcIface">Network connection</label>
+        <select id="pcIface"></select>
+        <div class="hint" id="pcIfaceHint"></div>
+      </div>
+      <div class="field">
+        <label for="pcName">Name for this capture</label>
+        <input id="pcName" type="text" maxlength="80" placeholder="e.g. Printer problem Tuesday">
+      </div>
+    </div>
+    <div class="field">
+      <label>What to record</label>
+      <div class="row wrap">
+        <div class="seg" id="pcProto" style="flex:2;min-width:360px">
+          <button data-v="any" class="on">Everything</button><button data-v="web">Web</button><button data-v="dns">DNS</button>
+          <button data-v="icmp">Pings</button><button data-v="tcp">TCP</button><button data-v="udp">UDP</button><button data-v="arp">ARP</button>
+        </div>
+        <input id="pcHost" type="text" placeholder="only to/from this address (optional)" spellcheck="false" style="flex:1;min-width:200px">
+        <input id="pcPort" type="number" min="1" max="65535" placeholder="port (optional)" style="width:9em">
+      </div>
+      <div class="hint" id="pcFilterText"></div>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label>Stop after</label>
+        <div class="seg" id="pcDuration">
+          <button data-v="30">30 s</button><button data-v="60" class="on">1 min</button><button data-v="300">5 min</button><button data-v="900">15 min</button><button data-v="0">Until I stop it</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="pcMaxMB">Or when the file reaches</label>
+        <select id="pcMaxMB" style="width:auto"><option value="10">10 MB</option><option value="50">50 MB</option><option value="100" selected>100 MB</option><option value="500">500 MB</option><option value="2000">2 GB</option></select>
+      </div>
+    </div>
+    <div id="pcPermission" class="hint"></div>
+    <button id="pcStart" class="btn primary big" style="margin-top:8px">Start recording</button>
+    <div id="pcError" class="error hidden"></div>
+  </section>
+
+  <section class="card hidden" id="pcLiveCard">
+    <div class="live-head"><div id="pcLiveStatus" class="status running">Recording…</div><div id="pcLiveTimer" class="timer"></div></div>
+    <div class="progress" id="pcProgress" style="margin:8px 0"><div class="bar"></div><span class="msg"></span></div>
+    <div class="tiles" id="pcLiveTiles"></div>
+    <div id="pcLiveProtos" class="protobar"></div>
+    <div class="table-wrap" style="max-height:320px;overflow:auto">
+      <table class="table pkts" id="pcLiveTable"><thead><tr><th>Time</th><th>From</th><th>To</th><th>Type</th><th>Size</th><th>What happened</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="row wrap" style="margin-top:10px"><button id="pcStop" class="btn stop primary">Stop recording</button><span class="hint">The list shows the latest packets; the full recording is saved for the viewer below.</span></div>
+  </section>
+
+  <section class="card hidden" id="pcViewCard">
+    <div class="row between wrap">
+      <div><h2 id="pcViewTitle" style="display:inline">Capture</h2> <button id="pcViewRename" class="btn small">Rename</button></div>
+      <div class="row wrap">
+        <button id="pcViewCsv" class="btn small">Export list (CSV)</button>
+        <button id="pcViewSave" class="btn small">Save a copy</button>
+        <button id="pcViewWireshark" class="btn small hidden">Open in Wireshark</button>
+        <button id="pcViewClose" class="btn small">Close</button>
+      </div>
+    </div>
+    <div id="pcViewMeta" class="hint"></div>
+    <div class="tiles" id="pcViewTiles" style="margin-top:10px"></div>
+    <div id="pcViewProtos" class="protobar"></div>
+    <div class="row wrap" id="pcTalkers" style="margin-top:6px"></div>
+    <div class="row wrap" style="margin-top:10px">
+      <div class="presets" id="pcFilterProto" style="margin:0"><span class="presets-label">Show</span>
+        <button class="chip on" data-b="">All</button><button class="chip" data-b="web">Web</button><button class="chip" data-b="dns">DNS</button>
+        <button class="chip" data-b="tcp">TCP</button><button class="chip" data-b="udp">UDP</button><button class="chip" data-b="icmp">Pings</button><button class="chip" data-b="arp">ARP</button><button class="chip" data-b="other">Other</button>
+      </div>
+      <input id="pcFHost" type="text" placeholder="address contains…" spellcheck="false" style="width:13em">
+      <input id="pcFPort" type="number" placeholder="port" style="width:6em">
+      <input id="pcFQ" type="text" placeholder="search the descriptions…" style="flex:1;min-width:160px">
+      <button id="pcFClear" class="btn small">Clear</button>
+    </div>
+    <div class="row between wrap" style="margin-top:8px"><span id="pcPageInfo" class="hint"></span><span class="mini-chips"><button id="pcPrev">◂ Previous</button><button id="pcNext">Next ▸</button></span></div>
+    <div class="table-wrap" style="max-height:440px;overflow:auto">
+      <table class="table pkts" id="pcViewTable"><thead><tr><th>No.</th><th>Time</th><th>From</th><th>To</th><th>Type</th><th>Size</th><th>What happened</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div id="pcDetail" class="detail hidden">
+      <div class="row between wrap"><h3 id="pcDetailTitle">Packet</h3><div class="row"><button id="pcFollow" class="btn small">Show only this conversation</button><button id="pcDetailClose" class="btn small">✕</button></div></div>
+      <div id="pcDetailBody"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row between wrap"><h2>Saved captures</h2><button id="pcImport" class="btn small">Open a capture file…</button></div>
+    <div id="pcList" class="history-list"><p class="hint">Recordings you make are kept here.</p></div>
+  </section>
+</section>
+
+<!-- ===================== WI-FI ===================== -->
+<section id="tab-wifi" class="tab hidden">
+  <section class="card">
+    <div class="row between wrap">
+      <h2>Wi‑Fi networks around you</h2>
+      <div class="row wrap">
+        <span class="seg" id="wfBand"><button data-v="all" class="on">All bands</button><button data-v="2.4">2.4 GHz</button><button data-v="5">5 GHz</button><button data-v="6">6 GHz</button></span>
+        <button id="wfToggle" class="btn small stop" style="color:#fff">Stop scanning</button>
+        <button id="wfCsv" class="btn small">Save as CSV</button>
+      </div>
+    </div>
+    <div id="wfIface" class="hint" style="margin-top:6px"></div>
+    <div id="wfConnected" class="wfconn hidden"></div>
+    <div id="wfError" class="error hidden"></div>
+    <div class="row wrap wffilters" style="margin-top:10px">
+      <span class="hint" style="font-weight:600">Show:</span>
+      <input id="wfFText" type="text" placeholder="Name contains…" spellcheck="false" autocomplete="off" style="width:12em">
+      <label>Hide weaker than <select id="wfFMin"><option value="">— any —</option><option value="-60">−60 dBm</option><option value="-70">−70 dBm</option><option value="-80">−80 dBm</option></select></label>
+      <label class="radio"><input type="checkbox" id="wfFHidden"> Hide hidden networks</label>
+      <label class="radio"><input type="checkbox" id="wfFOverlap"> Only networks overlapping mine</label>
+      <label class="radio"><input type="checkbox" id="wfShowStale"> Show networks that went quiet</label>
+      <button class="btn small ghost" id="wfFClear">Clear filters</button>
+    </div>
+    <div class="hint" style="margin-top:8px">Scanning asks the Wi‑Fi adapter to listen on every channel for a moment every few seconds, which can briefly slow your own connection. It stops when you leave this tab. Signal: −50 dBm or better is excellent, −60 good, −70 fair, −80 weak.</div>
+  </section>
+
+  <section class="card">
+    <h2>Channels in use</h2>
+    <div class="hint">Each shape is one network: its width is the channel width it occupies, its height is how strongly you hear it. Overlapping shapes compete for airtime.</div>
+    <div id="wfCharts"></div>
+    <div id="wfHint" class="hint" style="margin-top:6px"></div>
+    <div class="hint">Click a shape to see that network's details.</div>
+  </section>
+
+  <section class="card hidden" id="wfDetail">
+    <div class="row between wrap">
+      <div><h2 id="wfDetailTitle" style="display:inline">Network</h2> <span id="wfDetailBadges"></span></div>
+      <div class="row"><button id="wfDetailPlot" class="btn small">Plot signal</button><button id="wfDetailClose" class="btn small">✕</button></div>
+    </div>
+    <div id="wfDetailSub" class="hint mono"></div>
+    <div class="tiles" id="wfDetailTiles" style="margin-top:10px"></div>
+    <div id="wfDetailOverlap" class="notes"></div>
+  </section>
+
+  <section class="card">
+    <div class="row between wrap"><h2>Signal over time</h2><div class="row wrap"><span class="mini-chips" id="wfWin"><button data-w="300" class="on">5 min</button><button data-w="1800">30 min</button><button data-w="3600">1 h</button></span><button class="btn small" id="wfPlotAll">Plot all shown</button><button class="btn small ghost" id="wfPlotClear">Clear plots</button></div></div>
+    <div class="hint" id="wfPlotHint">Tick networks in the table below to plot them (or use Plot all shown). Your connected network is plotted automatically. Click a name in the legend to remove it.</div>
+    <canvas id="wfHistory" height="320"></canvas>
+    <div id="wfLegend" class="legend"></div>
+  </section>
+
+  <section class="card">
+    <div class="row between wrap"><h2 id="wfCount">Networks</h2><span class="hint">Tick a network to plot its signal above.</span></div>
+    <div class="table-wrap">
+      <table class="table" id="wfTable">
+        <thead><tr><th title="Tick to plot its signal below">Plot</th><th data-k="ssid" class="sortable">Network</th><th data-k="rssi" class="sortable sorted">Signal</th><th data-k="channel" class="sortable">Channel</th><th data-k="widthMHz" class="sortable">Width</th><th data-k="security" class="sortable">Security</th><th data-k="phy" class="sortable">Standard</th><th data-k="vendor" class="sortable">Made by</th><th data-k="seenAt" class="sortable">Last heard</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="wfEmpty" class="hint">Scanning… networks appear within a few seconds.</p>
+  </section>
+
+</section>
+
+</main>
+
+<!-- History detail dialog -->
+<dialog id="histDialog">
+  <div class="dlg-head"><h2 id="histTitle">Test</h2><button class="icon-btn" id="histClose">✕</button></div>
+  <div class="row" style="margin-bottom:10px">
+    <input id="histName" type="text" maxlength="80" placeholder="Give this test a name, e.g. Office Wi‑Fi before the upgrade" spellcheck="false">
+    <button id="histSave" class="btn small">Save name</button>
+  </div>
+  <div id="histBody"></div>
+  <div class="row wrap actions">
+    <button id="histRerun" class="btn primary">Run these settings again</button>
+    <button id="histCsv" class="btn">Save as CSV</button>
+    <button id="histJson" class="btn">Save full report</button>
+    <button id="histDelete" class="btn danger">Delete</button>
+  </div>
+</dialog>
+
+<dialog id="aboutDialog">
+  <div class="dlg-head"><h2>About LinkTest</h2><button class="icon-btn" id="aboutClose">✕</button></div>
+  <p>LinkTest <b id="aboutVer"></b> is a network toolbox for people who are not network engineers. Everything works offline, needs no installation and no administrator rights (except recording packets, which asks once).</p>
+  <p id="aboutEngine"></p>
+  <p class="hint" id="aboutState"></p>
+
+  <h3>Speed test</h3>
+  <p><b>What it is for:</b> measuring how fast two computers can move data between each other, which tells you what your cable, Wi‑Fi or switch really delivers.</p>
+  <ol>
+    <li>On one computer choose <b>Be the test target</b> and press Start. Note the address it shows.</li>
+    <li>On the other computer choose <b>Test my connection</b>, type that address, and press Start.</li>
+    <li>Read the verdict. Both computers are on your own network, so the number is your network's speed, not your internet provider's.</li>
+  </ol>
+  <p class="hint">Powered by iperf3 (BSD licence, github.com/esnet/iperf), bundled inside LinkTest.</p>
+
+  <h3>Scan network</h3>
+  <p><b>What it is for:</b> finding out what is on your network. Press Scan and every device that answers is listed with its address, name, maker and the services (ports) it offers, such as a web page, remote desktop or file sharing. Use it to find a printer's address, spot unknown devices, or check that a device is reachable. From any row you can jump to Watch it or look up its name.</p>
+
+  <h3>Ping monitor</h3>
+  <p><b>What it is for:</b> watching a connection over time to catch drop-outs and slow patches. Type an address and press Watch. The card shows the route hop by hop (like PingPlotter) with each router's reply time and loss, and below it the address's own reply-time chart. After three missed replies the card turns red and beeps; it turns back when replies return. History is kept for 30 days. Loss at a middle hop that does not continue to the hops after it is just that router being quiet, not a real problem.</p>
+
+  <h3>DNS lookup</h3>
+  <p><b>What it is for:</b> checking how names turn into addresses. Type a name (or an address for the reverse) and see the records your DNS server returns, side by side with public servers such as Cloudflare and Google. Highlighted rows differ between servers, which usually points at a stale or wrong record.</p>
+
+  <h3>Packet capture</h3>
+  <p><b>What it is for:</b> recording the actual traffic on a network connection when you need to see exactly what a device is doing, the way Wireshark does. Choose the connection, what to record and how long, then press Start. The viewer explains each packet in plain language, lets you filter by type, address or a word, and you can hand the file to Wireshark for the full detail. On Windows the built-in Npcap engine is used when Wireshark or Npcap is installed; otherwise Windows asks for administrator permission once per recording.</p>
+
+  <h3>Words you may see</h3>
+  <dl class="glossary">
+    <dt>Mbps / Gbps</dt><dd>Megabits or gigabits per second. Divide by 8 for megabytes per second, the number file copies show.</dd>
+    <dt>Retransmits</dt><dd>Pieces of data that had to be sent twice. A handful is normal; thousands mean the link is losing data.</dd>
+    <dt>Jitter</dt><dd>How uneven the packet timing is. Under 30 ms is fine for calls.</dd>
+    <dt>Packet loss</dt><dd>Share of packets that never arrived. Under 1% is fine for calls; a speed test should show almost none.</dd>
+    <dt>Hop</dt><dd>A router your traffic passes through on the way to its destination.</dd>
+    <dt>Port</dt><dd>A numbered door on a device; each service listens on its own (80/443 web, 22 SSH, 3389 Remote Desktop, 445 Windows sharing).</dd>
+    <dt>TCP / UDP</dt><dd>The two ways data travels: TCP checks everything arrived (web pages, files), UDP is quick and unchecked (calls, video, DNS).</dd>
+    <dt>Packet</dt><dd>One small chunk of data on the wire. A web page is thousands of them.</dd>
+  </dl>
+</dialog>
+
+<dialog id="notesDialog">
+  <div class="dlg-head"><h2>What's new</h2><button class="icon-btn" id="notesClose">✕</button></div>
+  <div id="notesBody" class="notes-body"></div>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/ui/app.js"></script>
+<script src="/ui/tools.js"></script>
+</body>
+</html>

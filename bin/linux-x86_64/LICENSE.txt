@@ -1,0 +1,15 @@
+Third-party binaries bundled into LinkTest for Linux (x86_64)
+============================================================
+
+iperf3 -- iperf 3.21, https://github.com/esnet/iperf
+  Copyright (c) 2014-2025, The Regents of the University of California, through
+  Lawrence Berkeley National Laboratory (subject to receipt of any required
+  approvals from the U.S. Dept. of Energy). All rights reserved.
+  Licensed under the BSD 3-Clause License; full text:
+  https://github.com/esnet/iperf/blob/master/LICENSE
+  Static (musl) build by userdocs: https://github.com/userdocs/iperf3-static
+  The build is statically linked against musl libc (MIT licence,
+  https://musl.libc.org/) and needs no shared libraries.
+
+LinkTest itself contains no code from iperf3; it runs the binary as a separate
+process and reads its output.
