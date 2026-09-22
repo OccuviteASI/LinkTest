@@ -45,9 +45,10 @@ def main() -> int:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for dirpath, dirnames, filenames in os.walk(ROOT):
             rel_dir = os.path.relpath(dirpath, ROOT).replace("\\", "/")
-            dirnames[:] = [d for d in dirnames if wanted((rel_dir + "/" + d).lstrip("./") + "/x")]
+            join = lambda name: name if rel_dir == "." else rel_dir + "/" + name  # noqa: E731
+            dirnames[:] = [d for d in dirnames if wanted(join(d) + "/x")]
             for fn in filenames:
-                rel = (rel_dir + "/" + fn).lstrip("./") if rel_dir != "." else fn
+                rel = join(fn)
                 if not wanted(rel):
                     continue
                 info = zipfile.ZipInfo.from_file(os.path.join(dirpath, fn), "LinkTest/" + rel)
