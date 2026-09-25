@@ -175,6 +175,8 @@ of the result = the build host's (2.38 needed by the Python runtime).
 
 ## 8. Testing recipes
 
+- Building both platforms in a Linux cloud container (done for 0.10.0): Linux natively (`python -m venv`, `pip install -r requirements.txt`, apt `libegl1 libgl1 libxkbcommon0 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2t64 libxcb-cursor0 …` for QtWebEngine, then `python build.py`). Windows under Wine 9 with the NuGet `python` 3.11.9 package: Windows wheels fetched on Linux with `pip download --platform win_amd64 --python-version 3.11 --only-binary=:all:` (plus `pefile pywin32-ctypes`, and a locally built `proxy_tools` wheel), installed offline, then `python.exe build.py` run through `script -qc` because Wine's console needs a pty. The Wine-built exe runs `--zeek-logs` and `--no-open` under Wine; the WebView2 window itself still needs a real Windows check. The native Qt window can be screenshotted under `Xvfb` (`QTWEBENGINE_DISABLE_SANDBOX=1` when running as root).
+
 - Zeek-style analyzer: sparse-clone Zeek (`testing/btest/Traces`, `testing/btest/Baseline/scripts.base.protocols.*`) and compare each log with ours ignoring `ts`/`uid`; `python linktest.py --zeek-logs file.pcap --out dir` for a quick look. Differences that remain on purpose: packets with bad checksums are analysed (Zeek drops them unless `-C`; local captures always have offloaded checksums), the SSH host-key fingerprint is the full `ssh-keygen -l` value (Zeek truncates it to 32 characters), software/known_* cover all hosts' software rather than only local ones, and Zeek's weird bookkeeping for malformed traffic is partial.
 
 - Browser-pane dev server: `.claude/launch.json` entry `linktest`

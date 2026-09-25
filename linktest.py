@@ -819,8 +819,8 @@ def open_native_window(app: App, url: str):
                 if not on_screen:
                     win.move(60, 60)
             else:
-                sc = webview.screens            # a function before start(), a list afterwards
-                screens = sc() if callable(sc) else sc
+                # webview.screens is a proxy that always looks callable; iterating it gives the list
+                screens = list(webview.screens)
                 if screens and not any(s.x - 10 <= x + 40 <= s.x + s.width and s.y - 10 <= y + 40 <= s.y + s.height for s in screens):
                     p = screens[0]
                     win.move(p.x + 60, p.y + 60)

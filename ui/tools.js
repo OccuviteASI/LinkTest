@@ -1137,9 +1137,9 @@ async function zkRender() {
   ZK.findings.sort((a, b) => (order[a._severity] ?? 1) - (order[b._severity] ?? 1));
   const LIM = 6; const many = ZK.findings.length > LIM + 1;
   $('#zkFindings').innerHTML = ZK.findings.length ? ZK.findings.map((x, i) =>
-    `<div class="zk-find ${esc(x._severity || 'warn')}"><div class="zk-ico">${x._severity === 'bad' ? '!' : x._severity === 'info' ? 'i' : '▲'}</div>` +
+    `<div class="zk-find ${esc(x._severity || 'warn')}"${many && i >= LIM ? ' hidden' : ''}><div class="zk-ico">${x._severity === 'bad' ? '!' : x._severity === 'info' ? 'i' : '▲'}</div>` +
     `<div><div class="m">${esc(x.msg)}</div><div class="t">${esc(x._plain || '')}</div><div class="soft zk-note">${esc(x.note)} · ${esc(zkFmt(x.ts, 'time', 'ts'))}</div></div>` +
-    `<div>${x._filter ? `<button class="btn small" data-i="${i}">Show</button>` : ''}</div></div>`.replace('<div class="zk-find', `<div${many && i >= LIM ? ' hidden' : ''} class="zk-find`)).join('') +
+    `<div>${x._filter ? `<button class="btn small" data-i="${i}">Show</button>` : ''}</div></div>`).join('') +
     (many ? `<button class="btn small" id="zkMoreFind">Show ${ZK.findings.length - LIM} more</button>` : '')
     : '<p class="hint" style="margin:4px 0">Nothing unusual: no failing connections, weak encryption, cleartext passwords, scans or address conflicts were found.</p>';
   const mf = $('#zkMoreFind'); if (mf) mf.onclick = () => { $$('#zkFindings .zk-find[hidden]').forEach(el => el.hidden = false); mf.remove(); };

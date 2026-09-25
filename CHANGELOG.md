@@ -31,6 +31,10 @@ All notable changes to LinkTest. The version number is defined once, in
 - Save the logs as Zeek TSV (zeek-cut, Splunk / Elastic add-ons, RITA) or JSON
   lines in a .zip, or one log at a time. Command line:
   `LinkTest --zeek-logs capture.pcapng [--out DIR] [--json] [--zip FILE]`.
+- A long findings list shows the first six, with "Show N more".
+- Fix (Linux / macOS): a window restored onto a monitor that is no longer
+  connected is pulled back onto a live screen again (the check always failed
+  with "'list' object is not callable" because `webview.screens` is a proxy).
 - The packet viewer now also reads Linux "cooked" captures (SLL / SLL2, what
   capturing on "any" produces), stacked VLAN tags, PPPoE and MPLS.
 

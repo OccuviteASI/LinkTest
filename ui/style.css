@@ -397,3 +397,5 @@ dialog li { margin: 4px 0; }
 #zkUid { font-family: var(--mono); font-size: 12px; }
 @media (max-width: 640px) { .zk-find { grid-template-columns: auto 1fr; } .zk-find > div:last-child { grid-column: 2; } }
 .table.zk-table td { overflow-wrap: break-word; word-break: normal; }
+.zk-find[hidden] { display: none; }
+#zkMoreFind { justify-self: start; }
