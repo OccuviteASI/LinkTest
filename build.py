@@ -94,6 +94,7 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
            "--paths", HERE,
            "--add-data", os.path.join(HERE, "ui") + SEP + "ui",
            "--add-data", os.path.join(HERE, "CHANGELOG.md") + SEP + ".",
+           "--hidden-import", "pcaplogs", "--hidden-import", "pcapproto", "--hidden-import", "zeek_tables",
            "--exclude-module", "tkinter", "--exclude-module", "unittest",
            "--exclude-module", "webview.platforms.cef", "--exclude-module", "webview.platforms.android",
            "--exclude-module", "webview.platforms.mshtml"]

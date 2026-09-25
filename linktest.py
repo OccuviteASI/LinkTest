@@ -9,6 +9,7 @@ All the iperf3 work is in iperf_runner.py; the bundled iperf3 lives in bin/.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import mimetypes
 import os
@@ -30,7 +31,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -193,7 +194,9 @@ class App:
         types = {".csv": ("CSV files (*.csv)", "All files (*.*)"),
                  ".json": ("JSON files (*.json)", "All files (*.*)"),
                  ".txt": ("Text files (*.txt)", "All files (*.*)"),
-                 ".pcapng": ("Capture files (*.pcapng)", "All files (*.*)")}.get(ext, ("All files (*.*)",))
+                 ".pcapng": ("Capture files (*.pcapng)", "All files (*.*)"),
+                 ".log": ("Zeek logs (*.log)", "All files (*.*)"),
+                 ".zip": ("Zip archives (*.zip)", "All files (*.*)")}.get(ext, ("All files (*.*)",))
         res = win.create_file_dialog(webview.FileDialog.SAVE, directory=downloads_dir(),
                                      save_filename=name, file_types=types)
         if not res:
@@ -436,7 +439,22 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/pcap/packets":
                 g = lambda k, d="": q.get(k, [d])[0]
                 return self._json(app.capture.packets(g("id"), proto=g("proto"), host=g("host"), port=g("port") or None, q=g("q"),
-                                                      offset=max(0, int(g("offset", "0") or 0)), limit=max(1, min(500, int(g("limit", "500") or 500)))))
+                                                      conn=g("conn"), offset=max(0, int(g("offset", "0") or 0)),
+                                                      limit=max(1, min(500, int(g("limit", "500") or 500)))))
+            if p == "/api/pcap/analysis":
+                return self._json(app.capture.analysis(q.get("id", [""])[0]))
+            if p == "/api/pcap/log":
+                g = lambda k, d="": q.get(k, [d])[0]
+                return self._json(app.capture.log_rows(g("id"), g("log", "conn"), q=g("q"), uid=g("uid"), sort=g("sort"),
+                                                       desc=g("desc") == "1", offset=max(0, int(g("offset", "0") or 0)),
+                                                       limit=max(1, min(1000, int(g("limit", "200") or 200)))))
+            if p == "/api/pcap/log-text":
+                g = lambda k, d="": q.get(k, [d])[0]
+                cid, log, fmt = g("id"), g("log", "conn"), g("fmt", "zeek")
+                e = app.capture.entry(cid)
+                safe = re.sub(r"[^A-Za-z0-9._-]+", "-", e.get("name") or cid)[:50]
+                ext = "json" if fmt == "json" else "log"
+                return self._json({"name": f"{safe}-{log}.{ext}", "text": app.capture.log_text(cid, log, fmt)})
             if p == "/api/pcap/packet":
                 return self._json(app.capture.packet(q.get("id", [""])[0], int(q.get("n", ["0"])[0] or 0)))
             if p == "/api/pcap/csv":
@@ -444,7 +462,8 @@ class Handler(BaseHTTPRequestHandler):
                 cid = g("id")
                 e = app.capture.entry(cid)
                 safe = re.sub(r"[^A-Za-z0-9._-]+", "-", e.get("name") or cid)[:50]
-                return self._json({"name": f"{safe}.csv", "text": app.capture.csv(cid, proto=g("proto"), host=g("host"), port=g("port") or None, q=g("q"))})
+                return self._json({"name": f"{safe}.csv", "text": app.capture.csv(cid, proto=g("proto"), host=g("host"), port=g("port") or None,
+                                                                                  q=g("q"), conn=g("conn"))})
         except ValueError as e:
             return self._json({"error": str(e)}, 400)
         except Exception as e:
@@ -625,6 +644,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "not-windowed", "path": app.capture.path_for(cid)}, 400)
                 safe = re.sub(r"[^A-Za-z0-9._ -]+", "-", e.get("name") or cid)[:60]
                 path = app.export_path(safe + ".pcapng", app.capture.path_for(cid))
+                if path is None:
+                    return self._json({"ok": False, "cancelled": True})
+                return self._json({"ok": True, "path": path})
+            if p == "/api/pcap/analyze":
+                return self._json({"ok": True, **app.capture.analyze(str(body.get("id", "")), bool(body.get("force")))})
+            if p == "/api/pcap/logs-export":
+                cid = str(body.get("id", ""))
+                fmt = "json" if body.get("format") == "json" else "zeek"
+                e = app.capture.entry(cid)
+                zpath = app.capture.logs_zip(cid, fmt)
+                safe = re.sub(r"[^A-Za-z0-9._ -]+", "-", e.get("name") or cid)[:60]
+                name = f"{safe}-{'zeek' if fmt == 'zeek' else 'json'}-logs.zip"
+                if not app.windowed:
+                    with open(zpath, "rb") as f:
+                        data = base64.b64encode(f.read()).decode()
+                    return self._json({"ok": True, "name": name, "b64": data, "path": zpath})
+                path = app.export_path(name, zpath)
                 if path is None:
                     return self._json({"ok": False, "cancelled": True})
                 return self._json({"ok": True, "path": path})
@@ -852,6 +888,10 @@ def main(argv=None) -> int:
     if "--capture-helper" in raw:
         # Packet-capture helper mode (may be running elevated). No UI, no server.
         return pc.capture_helper_main(raw)
+    if raw and raw[0] == "--zeek-logs":
+        # Command line: write Zeek-style logs for a capture file and exit.
+        import pcaplogs
+        return pcaplogs.cli_main(raw[1:])
     ap = argparse.ArgumentParser(description="LinkTest - friendly iperf3")
     ap.add_argument("--port", type=int, default=0, help="local UI port (default: pick a free one)")
     ap.add_argument("--browser", action="store_true",

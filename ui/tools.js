@@ -897,13 +897,14 @@ function pcRow(s, t0, withNo) {
 async function pcOpen(id) {
   const r = await api('/api/pcap/stats?id=' + encodeURIComponent(id));
   if (r.error) { toast(r.error); return; }
-  PC.viewId = id; PC.view = r; PC.offset = 0; PC.sel = null; PC.filter = { proto: '', host: '', port: '', q: '' };
+  PC.viewId = id; PC.view = r; PC.offset = 0; PC.sel = null; PC.filter = { proto: '', host: '', port: '', q: '', conn: '' };
   $$('#pcFilterProto .chip').forEach(c => c.classList.toggle('on', c.dataset.b === ''));
   $('#pcFHost').value = ''; $('#pcFPort').value = ''; $('#pcFQ').value = '';
   $('#pcDetail').classList.add('hidden');
   pcRenderViewer(); await pcPage();
   $('#pcViewCard').classList.remove('hidden');
   $('#pcViewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  zkOpen(id);
 }
 function pcRenderViewer() {
   const v = PC.view; const st = v.stats || {};
@@ -919,14 +920,15 @@ function pcRenderViewer() {
   $('#pcViewWireshark').classList.toggle('hidden', !v.wireshark);
 }
 async function pcPage() {
-  const f = PC.filter; const qs = new URLSearchParams({ id: PC.viewId, proto: f.proto, host: f.host, port: f.port, q: f.q, offset: PC.offset, limit: 500 });
+  const f = PC.filter; const qs = new URLSearchParams({ id: PC.viewId, proto: f.proto, host: f.host, port: f.port, q: f.q, conn: f.conn || '', offset: PC.offset, limit: 500 });
   const r = await api('/api/pcap/packets?' + qs.toString());
   if (r.error) { toast(r.error); return; }
   PC.total = r.total;
   const t0 = (PC.view.stats && PC.view.stats.first) || (r.rows[0] && r.rows[0].ts) || 0;
   $('#pcViewTable tbody').innerHTML = r.rows.map(s => pcRow(s, t0, true)).join('') || '<tr><td colspan="7" class="hint">No packets match this filter.</td></tr>';
   const from = r.total ? PC.offset + 1 : 0, to = Math.min(PC.offset + 500, r.total);
-  $('#pcPageInfo').textContent = r.total ? `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${r.total.toLocaleString()} packets` : 'No packets';
+  $('#pcPageInfo').textContent = (r.total ? `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${r.total.toLocaleString()} packets` : 'No packets') +
+    (f.conn ? ` of one connection (${(c => c[1] ? `${c[0]}:${c[1]} ↔ ${c[2]}:${c[3]}` : `${c[0]} ↔ ${c[2]}`)(f.conn.split('|'))}) · Clear to show all` : '');
   $('#pcPrev').disabled = PC.offset === 0; $('#pcNext').disabled = to >= r.total;
 }
 async function pcDetail(n) {
@@ -943,8 +945,9 @@ async function pcDetail(n) {
 }
 function pcFollow() {
   const s = PC.selSummary; if (!s) return;
-  PC.filter = { proto: '', host: s.src, port: s.sport != null ? String(Math.min(s.sport, s.dport)) : '', q: s.dst };
-  $('#pcFHost').value = s.src; $('#pcFPort').value = PC.filter.port; $('#pcFQ').value = s.dst;
+  const ports = s.sport != null && s.dport != null;
+  PC.filter = { proto: '', host: '', port: '', q: '', conn: [s.src, ports ? s.sport : '', s.dst, ports ? s.dport : '', '', ''].join('|') };
+  $('#pcFHost').value = ''; $('#pcFPort').value = ''; $('#pcFQ').value = '';
   $$('#pcFilterProto .chip').forEach(c => c.classList.toggle('on', c.dataset.b === ''));
   PC.offset = 0; pcPage();
 }
@@ -965,7 +968,7 @@ async function pcList() {
     ev.stopPropagation(); const id = el.dataset.id;
     if (b.dataset.act === 'open') pcOpen(id);
     else if (b.dataset.act === 'ws') { const r2 = await api('/api/pcap/wireshark', { id }); if (r2.error) toast(r2.error); }
-    else if (b.dataset.act === 'del') { if (confirm('Delete this recording?')) { const r2 = await api('/api/pcap/delete', { id }); if (r2.error) toast(r2.error); if (PC.viewId === id) $('#pcViewCard').classList.add('hidden'); pcList(); } }
+    else if (b.dataset.act === 'del') { if (confirm('Delete this recording?')) { const r2 = await api('/api/pcap/delete', { id }); if (r2.error) toast(r2.error); if (PC.viewId === id) $('#pcViewCard').classList.add('hidden'); if (ZK.id === id) { $('#zkCard').classList.add('hidden'); ZK.id = null; } pcList(); } }
     else if (b.dataset.act === 'rename') pcRenameInline(el, id);
   }));
 }
@@ -977,6 +980,297 @@ function pcRenameInline(el, id) {
   const finish = async save => { if (done) return; done = true; if (save && inp.value.trim() && inp.value.trim() !== old) { const r = await api('/api/pcap/rename', { id, name: inp.value.trim() }); if (r.error) toast(r.error); if (PC.viewId === id && PC.view) { PC.view.name = inp.value.trim(); $('#pcViewTitle').textContent = PC.view.name; } } pcList(); };
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); });
   inp.addEventListener('blur', () => finish(true));
+}
+
+/* ------------------------------------------------------------------------ */
+/* Connections & findings (Zeek-style logs)                                 */
+/* ------------------------------------------------------------------------ */
+const ZK = { id: null, state: null, summary: null, log: 'conn', q: '', uid: '', offset: 0, total: 0, all: false, timer: null,
+  data: null, sel: null, t0: 0, sort: '', desc: false, findings: [] };
+const ZK_LOGS = [['notice', 'Findings'], ['conn', 'Connections'], ['dns', 'DNS'], ['http', 'Web (HTTP)'], ['ssl', 'Secure (TLS)'],
+  ['quic', 'QUIC'], ['x509', 'Certificates'], ['files', 'Files'], ['ssh', 'SSH'], ['dhcp', 'DHCP'], ['ftp', 'FTP'], ['ntp', 'Time (NTP)'],
+  ['software', 'Software'], ['known_hosts', 'Known hosts'], ['known_services', 'Known services'], ['weird', 'Oddities']];
+// [field, header, secondary field shown underneath]
+const ZK_COLS = {
+  conn: [['ts', 'When'], ['id.orig_h', 'From', 'id.orig_p'], ['id.resp_h', 'To', 'id.resp_p'], ['service', 'Service', 'proto'], ['duration', 'Lasted'],
+    ['orig_bytes', 'Sent'], ['resp_bytes', 'Received'], ['conn_state', 'Outcome'], ['history', 'History']],
+  dns: [['ts', 'When'], ['id.orig_h', 'Asked by'], ['id.resp_h', 'DNS server'], ['query', 'Name'], ['qtype_name', 'Type'], ['rcode_name', 'Result'],
+    ['answers', 'Answers'], ['rtt', 'Reply time']],
+  http: [['ts', 'When'], ['id.orig_h', 'From'], ['host', 'Site', 'id.resp_h'], ['method', 'Method'], ['uri', 'Address (URI)'], ['status_code', 'Result', 'status_msg'],
+    ['response_body_len', 'Size'], ['resp_mime_types', 'Type'], ['user_agent', 'Program']],
+  ssl: [['ts', 'When'], ['id.orig_h', 'From'], ['server_name', 'Site', 'id.resp_h'], ['version', 'Version'], ['cipher', 'Cipher'], ['established', 'Completed'],
+    ['sni_matches_cert', 'Certificate matches'], ['ja4', 'JA4 fingerprint']],
+  quic: [['ts', 'When'], ['id.orig_h', 'From'], ['server_name', 'Site', 'id.resp_h'], ['version', 'Version'], ['client_protocol', 'Protocol'], ['history', 'History']],
+  x509: [['ts', 'When'], ['certificate.subject', 'Issued to'], ['certificate.issuer', 'Issued by'], ['certificate.not_valid_after', 'Expires'],
+    ['certificate.key_type', 'Key', 'certificate.key_length'], ['san.dns', 'Names it covers']],
+  files: [['ts', 'When'], ['source', 'Carried by'], ['mime_type', 'Type'], ['filename', 'Name'], ['seen_bytes', 'Size'], ['id.resp_h', 'Server'], ['sha256', 'SHA-256']],
+  ssh: [['ts', 'When'], ['id.orig_h', 'From'], ['id.resp_h', 'To', 'id.resp_p'], ['client', 'Client'], ['server', 'Server'], ['auth_success', 'Logged in'],
+    ['auth_attempts', 'Attempts'], ['kex_alg', 'Key exchange']],
+  dhcp: [['ts', 'When'], ['mac', 'Device'], ['host_name', 'Name'], ['assigned_addr', 'Address given'], ['server_addr', 'DHCP server'], ['msg_types', 'Messages'],
+    ['lease_time', 'Lease']],
+  ftp: [['ts', 'When'], ['id.orig_h', 'From'], ['id.resp_h', 'Server'], ['user', 'User'], ['command', 'Command'], ['arg', 'Argument'], ['reply_code', 'Reply', 'reply_msg']],
+  ntp: [['ts', 'When'], ['id.orig_h', 'From'], ['id.resp_h', 'To'], ['mode', 'Mode'], ['stratum', 'Stratum'], ['ref_id', 'Reference'], ['xmt_time', 'Their clock']],
+  software: [['ts', 'When'], ['host', 'Host', 'host_p'], ['software_type', 'Kind'], ['name', 'Software'], ['unparsed_version', 'Version string']],
+  known_hosts: [['ts', 'First seen'], ['host', 'Host']],
+  known_services: [['ts', 'First seen'], ['host', 'Host'], ['port_num', 'Port', 'port_proto'], ['service', 'Service']],
+  notice: [['ts', 'When'], ['note', 'Finding'], ['msg', 'Details'], ['src', 'Source'], ['dst', 'Destination', 'p']],
+  weird: [['ts', 'When'], ['name', 'Oddity'], ['addl', 'Detail'], ['id.orig_h', 'From', 'id.orig_p'], ['id.resp_h', 'To', 'id.resp_p']],
+};
+const ZK_STATE = { S0: ['No answer', 'warn'], S1: ['Open', 'good'], SF: ['Normal', 'good'], REJ: ['Refused', 'bad'], S2: ['Closed by starter', 'good'],
+  S3: ['Closed by answerer', 'good'], RSTO: ['Aborted by starter', 'warn'], RSTR: ['Aborted by answerer', 'warn'], RSTOS0: ['Gave up', 'warn'],
+  RSTRH: ['Reset (no SYN)', 'warn'], SH: ['No answer', 'warn'], SHR: ['Answer only', ''], OTH: ['Mid-stream', ''] };
+const ZK_STATE_TEXT = { S0: 'Connection attempt seen, no reply.', S1: 'Connection established, not closed.', SF: 'Normal: established and closed.',
+  REJ: 'Connection attempt rejected (refused).', S2: 'Established; the starting side closed it, no reply to that.',
+  S3: 'Established; the answering side closed it, no reply to that.', RSTO: 'Established, then the starting side aborted it (reset).',
+  RSTR: 'The answering side aborted it (reset).', RSTOS0: 'The starting side sent a SYN then reset; never answered.',
+  RSTRH: 'The answering side sent SYN-ACK then reset; no SYN seen.', SH: 'The starting side sent a SYN then a FIN; never answered.',
+  SHR: 'Only the answering side was seen.', OTH: 'No handshake seen (caught mid-way, or not TCP).' };
+const ZK_HIST = { s: 'sent a SYN (start)', h: 'answered with SYN-ACK', a: 'sent a bare acknowledgement', d: 'sent data', f: 'closed (FIN)',
+  r: 'aborted (RST)', c: 'sent a packet with a bad checksum', g: 'had data missing from the capture', t: 'resent data (retransmission)',
+  w: 'said its receive buffer was full (zero window)', i: 'sent FIN and RST together', q: 'sent an unusual flag combination' };
+const ZK_HELP = {
+  uid: 'Connection ID: every log line from the same conversation carries it.', conn_state: 'How the connection went (see Outcome).',
+  history: 'The conversation step by step: capitals are the side that started it, small letters the side that answered.',
+  service: 'The protocol recognised inside the connection (from its content, not just the port).', duration: 'From first to last packet.',
+  orig_bytes: 'Data bytes sent by the side that started the connection.', resp_bytes: 'Data bytes sent back by the other side.',
+  missed_bytes: 'Bytes the capture did not see (packets lost by the capture, not by the network).', local_orig: 'Is the starting side on a private (local) network?',
+  local_resp: 'Is the answering side on a private (local) network?', orig_ip_bytes: 'Everything the starting side sent, headers included.',
+  resp_ip_bytes: 'Everything the answering side sent, headers included.', community_id: 'Community ID: the same flow hash Suricata, Wireshark and Elastic use.',
+  orig_l2_addr: 'Hardware (MAC) address of the starting side.', resp_l2_addr: 'Hardware (MAC) address of the answering side.',
+  rtt: 'Time between the question and the answer.', rcode_name: 'NOERROR = fine, NXDOMAIN = the name does not exist, SERVFAIL = the server failed.',
+  AA: 'The answer came from the server responsible for the name.', RA: 'The server does lookups on your behalf.', rejected: 'The server refused to answer.',
+  server_name: 'The site name the client asked for (SNI).', established: 'The secure connection completed its handshake.',
+  sni_matches_cert: 'The certificate covers the name that was asked for.', ja3: 'JA3 client fingerprint (MD5).', ja3s: 'JA3S server fingerprint (MD5).',
+  ja4: 'JA4 client fingerprint: identifies the program making the connection.', resumed: 'An earlier secure session was reused.',
+  cert_chain_fps: 'SHA-256 fingerprints of the certificates the server sent (see Certificates).', next_protocol: 'Protocol agreed inside the secure connection (h2 = HTTP/2).',
+  auth_success: 'Guessed from packet sizes: SSH hides the login itself.', host_key_fingerprint: 'The server key, as ssh-keygen -l shows it.',
+  'certificate.not_valid_after': 'Expiry date.', 'certificate.not_valid_before': 'Start of validity.', md5: 'MD5 of the file (for looking it up).',
+  sha1: 'SHA-1 of the file.', sha256: 'SHA-256 of the file (for looking it up, e.g. on VirusTotal).', mime_type: 'File type, from its content.',
+};
+const zkDash = v => v === '-' || v === '(empty)' || v == null;
+const zkUnesc = v => String(v).replace(/\\x([0-9a-fA-F]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+
+function zkFmt(v, t, f) {
+  if (zkDash(v)) return '';
+  if (t === 'time') {
+    const x = +v;
+    if (!x) return '';
+    if (f === 'ts' && ZK.t0 && ZK.span < 86400) return '+' + fmtDurS(Math.max(0, x - ZK.t0));
+    return new Date(x * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' });
+  }
+  if (t === 'interval') { const x = +v; return x < 1 ? `${(x * 1000).toFixed(x < 0.01 ? 2 : 1)} ms` : fmtDurS(x); }
+  if (t === 'bool') return v === 'T' ? 'yes' : 'no';
+  if (t === 'count' && /(bytes|_len|seen_bytes|file_size)$/.test(f)) return +v ? fmtBytes(+v) : '0';
+  if (t.startsWith('set[') || t.startsWith('vector[')) return v.split(',').map(zkUnesc).join(', ');
+  return zkUnesc(v);
+}
+function zkTitleTs(v) { return zkDash(v) ? '' : new Date(+v * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' }); }
+function zkHistory(h) {
+  if (zkDash(h)) return '';
+  const out = [];
+  for (const ch of h) {
+    if (ch === '^') { out.push('The direction was guessed: the start of the connection was not captured.'); continue; }
+    const m = ZK_HIST[ch.toLowerCase()];
+    if (m) out.push(`${ch}: the ${ch === ch.toLowerCase() ? 'answering' : 'starting'} side ${m}`);
+  }
+  return out.join('\n');
+}
+
+async function zkOpen(id) {
+  ZK.id = id; ZK.summary = null; ZK.sel = null; ZK.uid = ''; ZK.q = ''; ZK.offset = 0; ZK.sort = ''; ZK.desc = false;
+  $('#zkQ').value = ''; $('#zkCard').classList.remove('hidden'); $('#zkBody').classList.add('hidden'); $('#zkError').classList.add('hidden');
+  $('#zkDetail').classList.add('hidden');
+  const r = await api('/api/pcap/analysis?id=' + encodeURIComponent(id));
+  if (r.error) { zkErr(r.error); return; }
+  if (r.state === 'none' || r.state === 'cancelled') { const s = await api('/api/pcap/analyze', { id }); if (s.error) { zkErr(s.error); return; } zkApply(s); }
+  else zkApply(r);
+}
+function zkErr(msg) { const e = $('#zkError'); e.textContent = msg; e.classList.remove('hidden'); $('#zkProgress').classList.add('hidden'); }
+function zkApply(r) {
+  ZK.state = r.state;
+  const prog = $('#zkProgress');
+  if (r.state === 'running') {
+    prog.classList.remove('hidden');
+    $('.bar', prog).style.width = Math.round((r.progress || 0) * 100) + '%';
+    $('.msg', prog).textContent = `Analysing… ${(r.packets || 0).toLocaleString()} packets read`;
+    if (!ZK.timer) ZK.timer = setInterval(zkPoll, 700);
+    return;
+  }
+  clearInterval(ZK.timer); ZK.timer = null; prog.classList.add('hidden');
+  if (r.state === 'error') { zkErr(r.error || 'The analysis failed.'); return; }
+  if (r.state === 'done') { ZK.summary = r.summary; zkRender(); }
+}
+async function zkPoll() {
+  if (!ZK.id) { clearInterval(ZK.timer); ZK.timer = null; return; }
+  const id = ZK.id;
+  const r = await api('/api/pcap/analysis?id=' + encodeURIComponent(id));
+  if (id !== ZK.id || r.error) return;
+  zkApply(r);
+}
+async function zkRender() {
+  const s = ZK.summary; if (!s) return;
+  ZK.t0 = (s.meta && s.meta.first) || 0;
+  ZK.span = s.meta && s.meta.last && s.meta.first ? s.meta.last - s.meta.first : 0;
+  $('#zkBody').classList.remove('hidden');
+  const f = s.findings || {}; const nf = (f.bad || 0) + (f.warn || 0);
+  $('#zkTiles').innerHTML = [
+    tile('Connections', (s.counts.conn || 0).toLocaleString()),
+    tile('Completed normally', s.tcpTotal ? `${s.tcpOk.toLocaleString()}<small>of ${s.tcpTotal.toLocaleString()} TCP</small>` : '—'),
+    tile('Failed attempts', (s.tcpFailed || 0).toLocaleString(), s.tcpFailed ? 'warn' : 'good'),
+    tile('Devices', String(s.hosts || 0)), tile('Sites', String((s.sites || []).length)),
+    tile('Findings', nf ? String(nf) : 'none', f.bad ? 'bad' : nf ? 'warn' : 'good'),
+    tile('Analysis took', `${s.meta.seconds}<small>s</small>`)].join('');
+  // outcome bar
+  const st = s.states || []; const tot = st.reduce((a, x) => a + x.count, 0);
+  const col = k => ({ good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)' }[(ZK_STATE[k] || [])[1]] || 'var(--soft)');
+  $('#zkStates').innerHTML = tot ? `<div class="protobar" title="Connection outcomes">${st.map(x => `<span style="width:${Math.max(0.5, x.count / tot * 100)}%;background:${col(x.state)}" title="${esc(x.state)}: ${x.count} (${esc(x.text)})"></span>`).join('')}</div>` +
+    `<div class="protolegend">${st.map(x => `<span class="zk-state" data-s="${esc(x.state)}" title="${esc(x.text)}"><i style="background:${col(x.state)}"></i>${esc((ZK_STATE[x.state] || [x.state])[0])} <span class="soft">${esc(x.state)}</span> ${x.count.toLocaleString()}</span>`).join('')}</div>` : '';
+  $$('#zkStates .zk-state').forEach(el => el.onclick = () => zkShow('conn', { q: el.dataset.s }));
+  // findings
+  const nr = await api(`/api/pcap/log?id=${encodeURIComponent(ZK.id)}&log=notice&limit=200`);
+  ZK.findings = [];
+  if (!nr.error) {
+    const fi = nr.fields.indexOf('note'), mi = nr.fields.indexOf('msg'), ti = nr.fields.indexOf('ts');
+    ZK.findings = nr.rows.map((row, i) => ({ note: row[fi], msg: zkUnesc(row[mi]), ts: row[ti], ...(nr.extra[i] || {}) }));
+  }
+  const order = { bad: 0, warn: 1, info: 2 };
+  ZK.findings.sort((a, b) => (order[a._severity] ?? 1) - (order[b._severity] ?? 1));
+  const LIM = 6; const many = ZK.findings.length > LIM + 1;
+  $('#zkFindings').innerHTML = ZK.findings.length ? ZK.findings.map((x, i) =>
+    `<div class="zk-find ${esc(x._severity || 'warn')}"><div class="zk-ico">${x._severity === 'bad' ? '!' : x._severity === 'info' ? 'i' : '▲'}</div>` +
+    `<div><div class="m">${esc(x.msg)}</div><div class="t">${esc(x._plain || '')}</div><div class="soft zk-note">${esc(x.note)} · ${esc(zkFmt(x.ts, 'time', 'ts'))}</div></div>` +
+    `<div>${x._filter ? `<button class="btn small" data-i="${i}">Show</button>` : ''}</div></div>`.replace('<div class="zk-find', `<div${many && i >= LIM ? ' hidden' : ''} class="zk-find`)).join('') +
+    (many ? `<button class="btn small" id="zkMoreFind">Show ${ZK.findings.length - LIM} more</button>` : '')
+    : '<p class="hint" style="margin:4px 0">Nothing unusual: no failing connections, weak encryption, cleartext passwords, scans or address conflicts were found.</p>';
+  const mf = $('#zkMoreFind'); if (mf) mf.onclick = () => { $$('#zkFindings .zk-find[hidden]').forEach(el => el.hidden = false); mf.remove(); };
+  $$('#zkFindings button[data-i]').forEach(b => b.onclick = () => { const flt = ZK.findings[+b.dataset.i]._filter || {}; flt.uid ? zkShow('conn', { uid: flt.uid }) : zkShow(flt.log || 'conn', { q: flt.q || '' }); });
+  // lists
+  $('#zkSites').innerHTML = (s.sites || []).length ? `<table class="table zk-mini"><tbody>${s.sites.map(x => `<tr data-q="${esc(x.name)}" data-log="${x.how.includes('HTTPS') ? 'ssl' : x.how.includes('QUIC') ? 'quic' : 'http'}"><td>${esc(x.name)}<span class="sub">${esc(x.how.join(', '))} · ${x.conns} connection${x.conns === 1 ? '' : 's'}</span></td><td class="num">${fmtBytes(x.bytes)}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No web or secure connections.</p>';
+  $('#zkQueries').innerHTML = (s.queries || []).length ? `<table class="table zk-mini"><tbody>${s.queries.map(x => `<tr data-q="${esc(x.name)}" data-log="dns"><td>${esc(x.name)}${x.nx ? ' <span class="pill pill-bad" style="font-size:11px">does not exist</span>' : ''}</td><td class="num">${x.count}×</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No DNS lookups.</p>';
+  $('#zkFails').innerHTML = (s.failures || []).length ? `<table class="table zk-mini"><tbody>${s.failures.map(x => `<tr data-q="${esc(x.host)}" data-log="conn"><td class="mono">${esc(x.host)}:${x.port}<span class="sub">${x.state === 'REJ' ? 'refused' : 'no answer'}</span></td><td class="num">${x.count}×</td></tr>`).join('')}</tbody></table>` : '<p class="hint">Every TCP connection got an answer.</p>';
+  $$('#zkBody .zk-mini tr[data-q]').forEach(tr => tr.onclick = () => zkShow(tr.dataset.log, { q: tr.dataset.q }));
+  // log chips
+  const c = s.counts || {};
+  $('#zkLogs').innerHTML = '<span class="presets-label">Show</span>' + ZK_LOGS.filter(([k]) => c[k] || k === 'conn').map(([k, label]) =>
+    `<button class="chip${k === ZK.log ? ' on' : ''}" data-log="${k}" title="${k}.log">${esc(label)} <small>${(c[k] || 0).toLocaleString()}</small></button>`).join('');
+  $$('#zkLogs .chip').forEach(b => b.onclick = () => zkShow(b.dataset.log, { q: ZK.q, uid: ZK.uid, keep: true }));
+  if (!c[ZK.log]) ZK.log = 'conn';
+  zkPage();
+}
+function zkShow(log, o = {}) {
+  ZK.log = log; ZK.offset = 0; ZK.sort = ''; ZK.desc = false;
+  if (!o.keep) { ZK.q = o.q || ''; ZK.uid = o.uid || ''; $('#zkQ').value = ZK.q; }
+  $$('#zkLogs .chip').forEach(b => b.classList.toggle('on', b.dataset.log === log));
+  $('#zkDetail').classList.add('hidden');
+  zkPage();
+  $('#zkLogs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function zkPage() {
+  if (!ZK.id || !ZK.summary) return;
+  const qs = new URLSearchParams({ id: ZK.id, log: ZK.log, q: ZK.q, uid: ZK.uid, offset: ZK.offset, limit: 200, sort: ZK.sort, desc: ZK.desc ? '1' : '0' });
+  const r = await api('/api/pcap/log?' + qs);
+  if (r.error) { toast(r.error); return; }
+  ZK.data = r;
+  const idx = {}; r.fields.forEach((f, i) => idx[f] = i);
+  const cols = ZK.all ? r.fields.map(f => [f, f]) : (ZK_COLS[ZK.log] || r.fields.map(f => [f, f]));
+  const th = cols.map(([f, h]) => `<th class="sortable${ZK.sort === f ? ' sorted' + (ZK.desc ? '' : ' asc') : ''}" data-f="${esc(f)}" title="${esc(f)}${ZK_HELP[f] ? ': ' + esc(ZK_HELP[f]) : ''}">${esc(h)}</th>`).join('');
+  $('#zkTable thead').innerHTML = `<tr>${th}</tr>`;
+  $$('#zkTable th.sortable').forEach(el => el.onclick = () => { const f = el.dataset.f; if (ZK.sort === f) ZK.desc = !ZK.desc; else { ZK.sort = f; ZK.desc = f === 'ts' ? false : true; } ZK.offset = 0; zkPage(); });
+  const cell = (row, f, f2) => {
+    const i = idx[f]; if (i === undefined) return '<td></td>';
+    const t = r.types[i]; const v = row[i];
+    let html;
+    if (f === 'conn_state' && !zkDash(v)) { const [label, cls] = ZK_STATE[v] || [v, '']; html = `<span class="zk-st ${cls}" title="${esc(ZK_STATE_TEXT[v] || '')}">${esc(label)}</span><span class="sub">${esc(v)}</span>`; }
+    else if (f === 'history' && !zkDash(v)) html = `<span class="mono" title="${esc(zkHistory(v))}">${esc(v)}</span>`;
+    else if (f === 'ts') html = `<span title="${esc(zkTitleTs(v))}">${esc(zkFmt(v, t, f))}</span>`;
+    else { const s = zkFmt(v, t, f); html = esc(s.length > 140 ? s.slice(0, 140) + '…' : s); }
+    if (f2 && idx[f2] !== undefined && !zkDash(row[idx[f2]])) html += `<span class="sub">${esc(zkFmt(row[idx[f2]], r.types[idx[f2]], f2))}</span>`;
+    const mono = /(^id\.|_h$|addr$|^host$|^src$|^dst$|mac$|sha|md5|ja[34]|fingerprint)/.test(f) ? ' class="mono"' : '';
+    return `<td${mono}>${html}</td>`;
+  };
+  $('#zkTable tbody').innerHTML = r.rows.map((row, n) => `<tr data-n="${n}" class="${ZK.sel === n ? 'sel' : ''}">${cols.map(([f, , f2]) => cell(row, f, ZK.all ? null : f2)).join('')}</tr>`).join('') ||
+    `<tr><td colspan="${cols.length}" class="hint">Nothing in this log${ZK.q || ZK.uid ? ' matches' : ''}.</td></tr>`;
+  const from = r.total ? ZK.offset + 1 : 0, to = Math.min(ZK.offset + 200, r.total);
+  $('#zkPageInfo').textContent = r.total ? `${from.toLocaleString()}–${to.toLocaleString()} of ${r.total.toLocaleString()} lines in ${ZK.log}.log` : `${ZK.log}.log`;
+  $('#zkPrev').disabled = ZK.offset === 0; $('#zkNext').disabled = to >= r.total;
+  const up = $('#zkUid');
+  if (ZK.uid) { up.innerHTML = `Only connection ${esc(ZK.uid)} <button class="linkbtn" title="Show all">✕</button>`; up.classList.remove('hidden'); $('button', up).onclick = () => { ZK.uid = ''; ZK.offset = 0; zkPage(); $('#zkPivotChips').innerHTML = ''; }; }
+  else up.classList.add('hidden');
+}
+function zkRowObj(n) {
+  const r = ZK.data; if (!r || !r.rows[n]) return null;
+  const o = {}; r.fields.forEach((f, i) => o[f] = r.rows[n][i]); return o;
+}
+async function zkDetail(n) {
+  ZK.sel = n;
+  $$('#zkTable tbody tr').forEach(tr => tr.classList.toggle('sel', +tr.dataset.n === n));
+  const r = ZK.data; const o = zkRowObj(n); if (!o) return;
+  const title = { conn: `${o['id.orig_h']} → ${o['id.resp_h']}:${o['id.resp_p']}`, dns: o.query, http: `${o.method || ''} ${o.host || ''}${o.uri || ''}`,
+    ssl: o.server_name !== '-' ? o.server_name : o['id.resp_h'], x509: o['certificate.subject'], files: o.filename !== '-' ? o.filename : o.mime_type,
+    notice: o.note, weird: o.name }[ZK.log] || `${ZK.log}.log line`;
+  $('#zkDetailTitle').textContent = zkUnesc(title || '');
+  $('#zkDetailBody').innerHTML = `<div class="kv">${r.fields.map((f, i) => {
+    const v = o[f]; if (zkDash(v)) return '';
+    let shown = zkFmt(v, r.types[i], f); if (f === 'ts' || r.types[i] === 'time') shown = zkTitleTs(v);
+    let note = ZK_HELP[f] || '';
+    if (f === 'conn_state') note = ZK_STATE_TEXT[v] || note;
+    if (f === 'history') note = zkHistory(v).split('\n').join(' · ');
+    return `<div class="k mono">${esc(f)}</div><div class="mono zk-val">${esc(shown)}${shown !== zkUnesc(v) && !['time', 'bool'].includes(r.types[i]) ? ` <span class="soft">(${esc(zkUnesc(v))})</span>` : ''}</div><div class="note">${esc(note)}</div>`;
+  }).join('')}</div>`;
+  const uid = o.uid && !zkDash(o.uid) ? o.uid : null;
+  $('#zkPivot').classList.toggle('hidden', !uid);
+  $('#zkPackets').classList.toggle('hidden', !(o['id.orig_h'] && !zkDash(o['id.orig_h'])));
+  $('#zkPivotChips').innerHTML = '';
+  $('#zkDetail').classList.remove('hidden');
+}
+async function zkPivot() {
+  const o = zkRowObj(ZK.sel); if (!o || zkDash(o.uid)) return;
+  const uid = o.uid; const box = $('#zkPivotChips');
+  box.innerHTML = '<span class="hint">Looking…</span>';
+  const logs = ZK_LOGS.map(([k]) => k).filter(k => !['software', 'known_hosts', 'known_services'].includes(k) && (ZK.summary.counts[k] || 0));
+  const res = await Promise.all(logs.map(k => api(`/api/pcap/log?${new URLSearchParams({ id: ZK.id, log: k, uid, limit: 1 })}`)));
+  const hits = logs.map((k, i) => [k, res[i].total || 0]).filter(([, n]) => n);
+  box.innerHTML = '<span class="presets-label">Connection ' + esc(uid) + ' appears in</span>' + hits.map(([k, n]) =>
+    `<button class="chip" data-log="${k}">${esc((ZK_LOGS.find(x => x[0] === k) || [k, k])[1])} <small>${n}</small></button>`).join('');
+  $$('.chip', box).forEach(b => b.onclick = () => zkShow(b.dataset.log, { uid }));
+}
+function zkPackets() {
+  const o = zkRowObj(ZK.sel); if (!o) return;
+  const proto = o.proto || '';
+  const ports = ZK.log === 'conn' ? (proto === 'tcp' || proto === 'udp') : !zkDash(o['id.resp_p']) && ZK.log !== 'weird';
+  const t0 = +o.ts || 0; const dur = zkDash(o.duration) ? 0 : +o.duration;
+  const spec = [o['id.orig_h'], ports ? o['id.orig_p'] : '', o['id.resp_h'], ports ? o['id.resp_p'] : '', ZK.log === 'conn' ? t0 : '', ZK.log === 'conn' ? t0 + dur : ''].join('|');
+  PC.filter = { proto: '', host: '', port: '', q: '', conn: spec };
+  $('#pcFHost').value = ''; $('#pcFPort').value = ''; $('#pcFQ').value = '';
+  $$('#pcFilterProto .chip').forEach(c => c.classList.toggle('on', c.dataset.b === ''));
+  PC.offset = 0; pcPage();
+  $('#pcViewCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function zkSaveZip(format) {
+  if (!ZK.id) return;
+  const r = await api('/api/pcap/logs-export', { id: ZK.id, format });
+  if (r.error) { toast(r.error); return; }
+  if (r.cancelled) return;
+  if (r.b64) {
+    const bin = atob(r.b64); const buf = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([buf], { type: 'application/zip' })); a.download = r.name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  } else if (r.path) toast('Saved to ' + r.path);
+}
+function wireZeek() {
+  $('#zkRerun').onclick = async () => { if (!ZK.id) return; $('#zkBody').classList.add('hidden'); const r = await api('/api/pcap/analyze', { id: ZK.id, force: true }); if (r.error) zkErr(r.error); else zkApply(r); };
+  $('#zkSaveZeek').onclick = () => zkSaveZip('zeek');
+  $('#zkSaveJson').onclick = () => zkSaveZip('json');
+  $('#zkSaveLog').onclick = async () => { const r = await api(`/api/pcap/log-text?${new URLSearchParams({ id: ZK.id, log: ZK.log })}`); if (r.error) toast(r.error); else download(r.name, r.text, 'text/plain'); };
+  let t;
+  $('#zkQ').addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { ZK.q = $('#zkQ').value.trim(); ZK.offset = 0; zkPage(); }, 250); });
+  $('#zkAll').onchange = () => { ZK.all = $('#zkAll').checked; zkPage(); };
+  $('#zkPrev').onclick = () => { ZK.offset = Math.max(0, ZK.offset - 200); zkPage(); };
+  $('#zkNext').onclick = () => { ZK.offset += 200; zkPage(); };
+  $('#zkTable').addEventListener('click', ev => { const tr = ev.target.closest('tr[data-n]'); if (tr) zkDetail(+tr.dataset.n); });
+  $('#zkDetailClose').onclick = () => { $('#zkDetail').classList.add('hidden'); ZK.sel = null; $$('#zkTable tr.sel').forEach(x => x.classList.remove('sel')); };
+  $('#zkPivot').onclick = zkPivot;
+  $('#zkPackets').onclick = zkPackets;
 }
 
 /* release notes */
@@ -1009,22 +1303,23 @@ function wireCapture() {
   ['pcHost', 'pcPort'].forEach(id => $('#' + id).addEventListener('input', pcFilterText));
   $('#pcStart').onclick = pcStart;
   $('#pcStop').onclick = pcStop;
-  $('#pcViewClose').onclick = () => $('#pcViewCard').classList.add('hidden');
+  $('#pcViewClose').onclick = () => { $('#pcViewCard').classList.add('hidden'); $('#zkCard').classList.add('hidden'); ZK.id = null; };
   $('#pcViewRename').onclick = async () => { const name = prompt('Name for this recording', PC.view ? PC.view.name : ''); if (name != null && PC.viewId) { const r = await api('/api/pcap/rename', { id: PC.viewId, name }); if (!r.error) { PC.view.name = r.capture.name; $('#pcViewTitle').textContent = r.capture.name; pcList(); } } };
-  $('#pcViewCsv').onclick = async () => { const f = PC.filter; const qs = new URLSearchParams({ id: PC.viewId, proto: f.proto, host: f.host, port: f.port, q: f.q }); const r = await api('/api/pcap/csv?' + qs); if (r.error) toast(r.error); else download(r.name, r.text, 'text/csv'); };
+  $('#pcViewCsv').onclick = async () => { const f = PC.filter; const qs = new URLSearchParams({ id: PC.viewId, proto: f.proto, host: f.host, port: f.port, q: f.q, conn: f.conn || '' }); const r = await api('/api/pcap/csv?' + qs); if (r.error) toast(r.error); else download(r.name, r.text, 'text/csv'); };
   $('#pcViewSave').onclick = async () => { const r = await api('/api/pcap/export', { id: PC.viewId }); if (r.ok) toast('Saved to ' + r.path); else if (r.error === 'not-windowed') toast('The file is at ' + r.path); else if (r.error) toast(r.error); };
   $('#pcViewWireshark').onclick = async () => { const r = await api('/api/pcap/wireshark', { id: PC.viewId }); if (r.error) toast(r.error); };
-  $$('#pcFilterProto .chip').forEach(c => c.onclick = () => { $$('#pcFilterProto .chip').forEach(x => x.classList.toggle('on', x === c)); PC.filter.proto = c.dataset.b; PC.offset = 0; pcPage(); });
+  $$('#pcFilterProto .chip').forEach(c => c.onclick = () => { $$('#pcFilterProto .chip').forEach(x => x.classList.toggle('on', x === c)); PC.filter.proto = c.dataset.b; PC.filter.conn = ''; PC.offset = 0; pcPage(); });
   let ft;
-  const applyF = () => { clearTimeout(ft); ft = setTimeout(() => { PC.filter.host = $('#pcFHost').value.trim(); PC.filter.port = $('#pcFPort').value.trim(); PC.filter.q = $('#pcFQ').value.trim(); PC.offset = 0; pcPage(); }, 250); };
+  const applyF = () => { clearTimeout(ft); ft = setTimeout(() => { PC.filter.host = $('#pcFHost').value.trim(); PC.filter.port = $('#pcFPort').value.trim(); PC.filter.q = $('#pcFQ').value.trim(); PC.filter.conn = ''; PC.offset = 0; pcPage(); }, 250); };
   ['pcFHost', 'pcFPort', 'pcFQ'].forEach(id => $('#' + id).addEventListener('input', applyF));
-  $('#pcFClear').onclick = () => { $('#pcFHost').value = ''; $('#pcFPort').value = ''; $('#pcFQ').value = ''; $$('#pcFilterProto .chip').forEach(x => x.classList.toggle('on', x.dataset.b === '')); PC.filter = { proto: '', host: '', port: '', q: '' }; PC.offset = 0; pcPage(); };
+  $('#pcFClear').onclick = () => { $('#pcFHost').value = ''; $('#pcFPort').value = ''; $('#pcFQ').value = ''; $$('#pcFilterProto .chip').forEach(x => x.classList.toggle('on', x.dataset.b === '')); PC.filter = { proto: '', host: '', port: '', q: '', conn: '' }; PC.offset = 0; pcPage(); };
   $('#pcPrev').onclick = () => { PC.offset = Math.max(0, PC.offset - 500); pcPage(); };
   $('#pcNext').onclick = () => { PC.offset += 500; pcPage(); };
   $('#pcViewTable').addEventListener('click', ev => { const tr = ev.target.closest('tr[data-n]'); if (tr) pcDetail(+tr.dataset.n); });
   $('#pcDetailClose').onclick = () => { $('#pcDetail').classList.add('hidden'); PC.sel = null; $$('#pcViewTable tr.sel').forEach(t => t.classList.remove('sel')); };
   $('#pcFollow').onclick = pcFollow;
   $('#pcImport').onclick = async () => { const r = await api('/api/pcap/import', {}); if (r.error === 'not-windowed') { const p = prompt('Path of the .pcap or .pcapng file'); if (p) { const r2 = await api('/api/pcap/open', { path: p }); if (r2.error) toast(r2.error); else { pcList(); pcOpen(r2.capture.id); } } } else if (r.error) toast(r.error); else if (r.ok) { pcList(); pcOpen(r.capture.id); } };
+  wireZeek();
   $('#verPill').onclick = showNotes;
   $('#notesClose').onclick = () => $('#notesDialog').close();
 }

@@ -364,3 +364,36 @@ dialog li { margin: 4px 0; }
 
 /* toast */
 .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: var(--text); color: var(--card); padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); z-index: 50; }
+
+/* connections & findings (Zeek-style logs) */
+.zk-h { font-size: 14px; margin: 16px 0 6px; }
+.zk-findings { display: grid; gap: 8px; }
+.zk-find { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); border-left: 4px solid var(--warn); background: var(--card); }
+.zk-find.bad { border-left-color: var(--bad); background: linear-gradient(90deg, var(--bad-soft), var(--card) 40%); }
+.zk-find.info { border-left-color: var(--accent); }
+.zk-find .m { font-weight: 600; font-size: 14px; }
+.zk-find .t { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.zk-note { font-size: 11.5px; margin-top: 4px; font-family: var(--mono); }
+.zk-ico { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; background: var(--warn-soft); color: var(--warn); }
+.zk-find.bad .zk-ico { background: var(--bad-soft); color: var(--bad); }
+.zk-find.info .zk-ico { background: var(--accent-soft); color: var(--accent); }
+.zk-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 6px 18px; }
+.zk-cols > div { min-width: 0; }
+.table.zk-mini td { padding: 5px 6px; font-size: 13px; cursor: pointer; word-break: break-word; }
+.table.zk-mini td.num { text-align: right; white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+.table.zk-mini tr:hover td { background: var(--accent-soft); }
+.zk-st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--line); color: var(--muted); white-space: nowrap; }
+.zk-st.good { background: var(--good-soft); color: var(--good); }
+.zk-st.warn { background: var(--warn-soft); color: var(--warn); }
+.zk-st.bad { background: var(--bad-soft); color: var(--bad); }
+.table.zk-table td { white-space: normal; max-width: 360px; }
+.table.zk-table td.mono { white-space: nowrap; }
+.zk-val { word-break: break-all; }
+.zk-state { cursor: pointer; }
+.zk-state:hover { color: var(--text); }
+.zk-logs .chip small { color: var(--muted); margin-left: 3px; }
+.zk-logs .chip.on small { color: var(--accent); }
+.linkbtn { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; padding: 0 0 0 4px; }
+#zkUid { font-family: var(--mono); font-size: 12px; }
+@media (max-width: 640px) { .zk-find { grid-template-columns: auto 1fr; } .zk-find > div:last-child { grid-column: 2; } }
+.table.zk-table td { overflow-wrap: break-word; word-break: normal; }

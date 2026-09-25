@@ -42,7 +42,10 @@ it to open another window (`POST /api/window`) and exits.
 |---|---|
 | `linktest.py` | Entry point. `App` (settings, history, tool objects), `Handler` (routes), `QuietServer`, native window helpers, `main()`. **Single source of `VERSION`.** |
 | `iperf_runner.py` | Everything iperf3: locating the bundled binary, option dict → argv (`build_args`), running it (`Runner`), parsing `--json-stream` and classic text, friendly error mapping, local addresses, firewall helpers (Windows netsh, Linux ufw/firewalld). |
-| `pcaptool.py` | Packet capture: pcapng writer, incremental pcap/pcapng reader, plain-language `Dissector`, `SimpleFilter`, engines (Npcap ctypes / raw socket / AF_PACKET), `capture_helper_main` (the `--capture-helper` process), `CaptureSession` (helper lifecycle, file tailing, stats, saved index, viewer queries). |
+| `pcaptool.py` | Packet capture: pcapng writer, incremental pcap/pcapng reader, plain-language `Dissector`, `SimpleFilter`, engines (Npcap ctypes / raw socket / AF_PACKET), `capture_helper_main` (the `--capture-helper` process), `CaptureSession` (helper lifecycle, file tailing, stats, saved index, viewer queries, Zeek-style analysis jobs). `link_decap` strips Ethernet/VLAN/PPPoE/MPLS/SLL/SLL2/raw headers for both the viewer and the analyzer; `PcapReader.iter_packets` streams big files.
+| `pcaplogs.py` | Zeek-style analyzer. `Analyzer.run(path)` → `Result`: connection table (5-tuple, Zeek TCP endpoint state machine ported from `TCPSessionAdapter.cc`, conn_state/history rules from `base/protocols/conn`, flip heuristics, 5 s attempt / 5 min TCP / 60 s UDP-ICMP timeouts), per-endpoint reassembly with gap detection (missed_bytes), content-based protocol detection, application analyzers (HTTP, TLS, SSH, FTP + ftp-data, SMTP/POP3/IMAP credentials, DNS over UDP/TCP, DHCP aggregation by xid, NTP, QUIC), files with hashes, post-processing (known_*, notices). `Result.tsv/json_lines/write_zip/rows`; `build_summary` feeds the UI; `cli_main` is `--zeek-logs`. |
+| `pcapproto.py` | Pure parsers for the analyzer: TLS ClientHello/ServerHello, JA3/JA3S/JA4, X.509 DER, AES-128 + HKDF for QUIC Initial decryption (RFC 9001 vectors), DNS/DHCP/NTP messages, file-type sniffing, software versions. |
+| `zeek_tables.py` | Generated name tables (cipher suites, TLS versions, curves, alerts, DNS types/classes/rcodes/opcodes, DHCP types) from Zeek's scripts via `tools/gen_zeek_tables.py`; BSD notice kept. |
 | `wifiscan.py` | Wi‑Fi scanner: WLAN API (ctypes) / netsh / nmcli / iw backends, 802.11 information-element parsing (HT/VHT/HE/EHT width, RSN security), `WifiScanner` thread with per-BSSID signal history and least-busy channel hint. |
 | `nettools.py` | ICMP pinger backends, `NetInfo` (interfaces, DNS servers, ARP), `parse_targets`, `Scanner`, `PingMonitor`/`Target`/`Hop` (PingPlotter-style route per target), `DnsClient`, `MacVendors`, `EventLog`.; `NetInfo.arp_rows()` (GetIpNetTable with adapter index → name / `/proc/net/arp` Device column), `MacVendors.lookup_smart()` (private-address heuristic), `mac_kind()`, `arp_report()`, `arp_lookup()` |
 | `ui/index.html` | One page; tab bar + one `<section class="tab">` per tool; dialogs. |
@@ -94,8 +97,13 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `/api/pcap/interfaces` | GET | Connections to record on (engine, elevation needed), engine info, last options |
 | `/api/pcap/start {iface, filter{host,port,proto}, duration, maxMB, name}`, `/api/pcap/stop` | POST | Capture control (helper process) |
 | `/api/pcap/status?since` | GET | Events `start, packets, progress, done` + live state |
-| `/api/pcap/list`, `/api/pcap/stats?id`, `/api/pcap/packets?id&proto&host&port&q&offset&limit`, `/api/pcap/packet?id&n`, `/api/pcap/csv?id…` | GET | Saved recordings and the viewer |
+| `/api/pcap/list`, `/api/pcap/stats?id`, `/api/pcap/packets?id&proto&host&port&q&conn&offset&limit` (`conn=a|pa|b|pb|t0|t1` = one connection), `/api/pcap/packet?id&n`, `/api/pcap/csv?id…` | GET | Saved recordings and the viewer |
 | `/api/pcap/{open,rename,delete,wireshark,import,export}` | POST | Open external file (native dialog), rename, delete, hand to Wireshark, save a copy |
+| `/api/pcap/analyze {id, force}` | POST | Start (or reuse) the Zeek-style analysis in a background thread |
+| `/api/pcap/analysis?id` | GET | `{state none/running/done/error, progress, packets, summary}` |
+| `/api/pcap/log?id&log&q&uid&sort&desc&offset&limit` | GET | One log page: `fields`, `types`, rows formatted as Zeek TSV values; notices carry `extra` (severity, plain text, filter) |
+| `/api/pcap/log-text?id&log&fmt` | GET | One log as Zeek TSV or JSON lines (for `download`) |
+| `/api/pcap/logs-export {id, format}` | POST | All logs as .zip: native Save dialog, or base64 in browser mode |
 | `/api/quit` | POST | Shut down |
 
 ## 4. State on disk
@@ -108,6 +116,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `history.json` | Speed-test results (≤ 300), each `{id, ts, label?, mode, opts, cmd, summary, intervals, iperfVersion, host}` |
 | `pings/<targetId>/<YYYY-MM-DD>.csv` | `ts,rtt_ms,status` per sample; written every 5 s; pruned after `pingRetentionDays` |
 | `captures/<id>.pcapng` + `captures.json` | Recordings and their index (name, connection, filter, times, counts); `<id>.meta.json` / `<id>.stop` are the helper's status and stop-flag files |
+| `captures/<id>-logs-<zeek|json>.zip` | Last exported log bundle (analysis results themselves live in memory, at most 3) |
 | `instance.json` | `{port, pid}` of the running instance |
 | `webview/` | WebView2 / Qt profile data |
 
@@ -165,6 +174,8 @@ of the result = the build host's (2.38 needed by the Python runtime).
 - **Threads are daemon**; shutdown flushes ping CSVs, stops iperf3, then exits.
 
 ## 8. Testing recipes
+
+- Zeek-style analyzer: sparse-clone Zeek (`testing/btest/Traces`, `testing/btest/Baseline/scripts.base.protocols.*`) and compare each log with ours ignoring `ts`/`uid`; `python linktest.py --zeek-logs file.pcap --out dir` for a quick look. Differences that remain on purpose: packets with bad checksums are analysed (Zeek drops them unless `-C`; local captures always have offloaded checksums), the SSH host-key fingerprint is the full `ssh-keygen -l` value (Zeek truncates it to 32 characters), software/known_* cover all hosts' software rather than only local ones, and Zeek's weird bookkeeping for malformed traffic is partial.
 
 - Browser-pane dev server: `.claude/launch.json` entry `linktest`
   (`python linktest.py --no-open --port 8765`); same HTML/JS as the window.

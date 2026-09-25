@@ -230,11 +230,166 @@ class PcapReader:
             f.seek(offset)
             return f.read(caplen)
 
+    def iter_packets(self):
+        """Stream the whole file once: yields (ts, data, linktype, orig_len). self.pos tracks progress.
+
+        Unlike read_new() this never holds more than one block in memory, so it suits the
+        analyzer on multi-gigabyte files. Truncated trailing blocks are ignored.
+        """
+        size = os.path.getsize(self.path)
+        with open(self.path, "rb", buffering=1 << 20) as f:
+            if not self._detect(f, size):
+                return
+            f.seek(self.pos)
+            rd = f.read
+            if self.fmt == "pcap":
+                hdr = struct.Struct(self.endian + "IIII")
+                div = 1e9 if self.pcap_ns else 1e6
+                lt = self.linktype
+                while True:
+                    h = rd(16)
+                    if len(h) < 16:
+                        break
+                    sec, sub, caplen, olen = hdr.unpack(h)
+                    if caplen > 0x4000000:
+                        raise ValueError("Corrupt capture file.")
+                    data = rd(caplen)
+                    if len(data) < caplen:
+                        break
+                    self.pos += 16 + caplen
+                    self.packets += 1
+                    yield sec + sub / div, data, lt, olen
+                return
+            while True:
+                h = rd(8)
+                if len(h) < 8:
+                    break
+                btype, tl = struct.unpack(self.endian + "II", h)
+                if btype == 0x0A0D0D0A:
+                    bom = rd(4)
+                    self.endian = "<" if struct.unpack("<I", bom)[0] == 0x1A2B3C4D else ">"
+                    btype, tl = struct.unpack(self.endian + "II", h)
+                    self.interfaces = []
+                    body = bom + rd(tl - 16) if tl >= 16 else b""
+                    rd(4)
+                    self.pos += tl
+                    continue
+                if tl < 12 or tl % 4 or tl > 0x4000000:
+                    raise ValueError("Corrupt capture file.")
+                body = rd(tl - 12)
+                trailer = rd(4)
+                if len(body) < tl - 12 or len(trailer) < 4:
+                    break
+                self.pos += tl
+                if btype == 6 and len(body) >= 20:
+                    ifid, tsh, tsl, caplen, olen = struct.unpack_from(self.endian + "IIIII", body, 0)
+                    iface = self.interfaces[ifid] if ifid < len(self.interfaces) else {"linktype": self.linktype or 1, "tsresol": 6}
+                    res = iface.get("tsresol", 6)
+                    ts = ((tsh << 32) | tsl) / (2 ** res if iface.get("tsbase2") else 10 ** res)
+                    self.packets += 1
+                    yield ts, body[20:20 + caplen], iface["linktype"], olen
+                elif btype == 1 and len(body) >= 8:
+                    linktype, _res, snaplen = struct.unpack_from(self.endian + "HHI", body, 0)
+                    iface = {"linktype": linktype, "tsresol": 6, "name": "", "snaplen": snaplen}
+                    p = 8
+                    while p + 4 <= len(body):
+                        code, ln = struct.unpack_from(self.endian + "HH", body, p)
+                        if code == 0:
+                            break
+                        val = body[p + 4:p + 4 + ln]
+                        if code == 9 and val:
+                            iface["tsresol"] = val[0] & 0x7F
+                            iface["tsbase2"] = bool(val[0] & 0x80)
+                        p += 4 + ln + ((-ln) % 4)
+                    self.interfaces.append(iface)
+                    if self.linktype is None:
+                        self.linktype = linktype
+                elif btype == 3 and len(body) >= 4:
+                    olen = struct.unpack_from(self.endian + "I", body, 0)[0]
+                    iface = self.interfaces[0] if self.interfaces else {"linktype": self.linktype or 1}
+                    caplen = min(olen, iface.get("snaplen") or 65535, len(body) - 4)
+                    self.packets += 1
+                    yield 0.0, body[4:4 + caplen], iface["linktype"], olen
+                elif btype == 2 and len(body) >= 20:
+                    ifid, _drops, tsh, tsl, caplen, olen = struct.unpack_from(self.endian + "HHIIII", body, 0)
+                    iface = self.interfaces[ifid] if ifid < len(self.interfaces) else {"linktype": self.linktype or 1, "tsresol": 6}
+                    self.packets += 1
+                    yield ((tsh << 32) | tsl) / 10 ** iface.get("tsresol", 6), body[20:20 + caplen], iface["linktype"], olen
+
 
 # ----------------------------------------------------------------------------
 # Dissector
 # ----------------------------------------------------------------------------
 ETH_IPV4, ETH_IPV6, ETH_ARP, ETH_VLAN = 0x0800, 0x86DD, 0x0806, 0x8100
+LINKTYPE_LOOP, LINKTYPE_SLL, LINKTYPE_SLL2, LINKTYPE_IPV4, LINKTYPE_IPV6 = 108, 113, 276, 228, 229
+VLAN_ETHERTYPES = (0x8100, 0x88A8, 0x9100)
+
+
+def link_decap(data: bytes, lt: int):
+    """Strip the link layer. -> (ethertype, offset, src_mac, dst_mac, [vlan ids]) or None.
+
+    Handles Ethernet (with stacked VLAN tags, PPPoE sessions and MPLS), BSD loopback,
+    raw IP and Linux "cooked" captures (SLL / SLL2, which is what capturing on the
+    Linux "any" interface produces). MACs are raw bytes (or None).
+    """
+    src = dst = None
+    vlans: list[int] = []
+    n = len(data)
+    if lt == LINKTYPE_ETHERNET:
+        if n < 14:
+            return None
+        dst, src = data[0:6], data[6:12]
+        et = (data[12] << 8) | data[13]
+        off = 14
+    elif lt in (LINKTYPE_NULL, LINKTYPE_LOOP):
+        if n < 5:
+            return None
+        v = data[4] >> 4
+        et = ETH_IPV4 if v == 4 else ETH_IPV6 if v == 6 else None
+        off = 4
+    elif lt in (LINKTYPE_RAW, 12, 14, LINKTYPE_IPV4, LINKTYPE_IPV6):
+        v = data[0] >> 4 if data else 0
+        et = ETH_IPV4 if v == 4 else ETH_IPV6 if v == 6 else None
+        off = 0
+    elif lt == LINKTYPE_SLL:
+        if n < 16:
+            return None
+        alen = (data[4] << 8) | data[5]
+        if alen == 6:
+            src = data[6:12]
+        et = (data[14] << 8) | data[15]
+        off = 16
+    elif lt == LINKTYPE_SLL2:
+        if n < 20:
+            return None
+        et = (data[0] << 8) | data[1]
+        if data[11] == 6:
+            src = data[12:18]
+        off = 20
+    else:
+        return None
+    for _ in range(4):
+        if et in VLAN_ETHERTYPES and n >= off + 4:
+            vlans.append(((data[off] << 8) | data[off + 1]) & 0x0FFF)
+            et = (data[off + 2] << 8) | data[off + 3]
+            off += 4
+        elif et == 0x8864 and n >= off + 8:  # PPPoE session
+            ppp = (data[off + 6] << 8) | data[off + 7]
+            et = ETH_IPV4 if ppp == 0x0021 else ETH_IPV6 if ppp == 0x0057 else None
+            off += 8
+        elif et in (0x8847, 0x8848):  # MPLS: pop labels to bottom of stack, then guess IPv4/IPv6
+            while n >= off + 4:
+                bos = data[off + 2] & 1
+                off += 4
+                if bos:
+                    break
+            v = data[off] >> 4 if n > off else 0
+            et = ETH_IPV4 if v == 4 else ETH_IPV6 if v == 6 else None
+        else:
+            break
+    return et, off, src, dst, vlans
+
+
 PROTO_BUCKET = {
     "DNS": "dns", "mDNS": "dns", "LLMNR": "dns", "HTTP": "web", "TLS": "web", "QUIC": "web",
     "ICMP": "icmp", "ICMPv6": "icmp", "ARP": "arp", "TCP": "tcp", "UDP": "udp",
@@ -296,29 +451,14 @@ class Dissector:
     def parse(self, data: bytes, linktype: int | None = None) -> dict:
         lt = self.linktype if linktype is None else linktype
         ctx: dict = {"len": len(data)}
-        off = 0
-        etype = None
-        if lt == LINKTYPE_ETHERNET:
-            if len(data) < 14:
-                return ctx
-            ctx["eth"] = {"dst": _mac(data[0:6]), "src": _mac(data[6:12])}
-            etype = struct.unpack_from("!H", data, 12)[0]
-            off = 14
-            if etype == ETH_VLAN and len(data) >= 18:
-                ctx["vlan"] = struct.unpack_from("!H", data, 14)[0] & 0x0FFF
-                etype = struct.unpack_from("!H", data, 16)[0]
-                off = 18
-        elif lt == LINKTYPE_NULL:
-            if len(data) < 4:
-                return ctx
-            af = struct.unpack_from("<I", data, 0)[0]
-            etype = ETH_IPV4 if af == 2 else ETH_IPV6 if af in (23, 24, 28, 30) else None
-            off = 4
-        elif lt == LINKTYPE_RAW:
-            v = data[0] >> 4 if data else 0
-            etype = ETH_IPV4 if v == 4 else ETH_IPV6 if v == 6 else None
-        else:
+        dec = link_decap(data, lt)
+        if dec is None:
             return ctx
+        etype, off, smac, dmac, vlans = dec
+        if smac is not None or dmac is not None:
+            ctx["eth"] = {"src": _mac(smac) if smac else "", "dst": _mac(dmac) if dmac else ""}
+        if vlans:
+            ctx["vlan"] = vlans[0]
         ctx["etype"] = etype
         if etype == ETH_ARP:
             self._arp(data, off, ctx)
@@ -1264,6 +1404,40 @@ class _Stats:
                 "hosts": len(self.talkers), "convCount": len(self.convs)}
 
 
+def _conn_filter(spec: str):
+    """"a|pa|b|pb|t0|t1" -> predicate selecting one connection's packets (either direction, time window).
+
+    Used by the Zeek-style analysis ("show the packets of this connection"); ports may be empty
+    for ICMP and other port-less protocols.
+    """
+    if not spec:
+        return None
+    parts = spec.split("|")
+    if len(parts) != 6:
+        return None
+    a, pa, b, pb, t0, t1 = parts
+    try:
+        pa_i = int(pa) if pa not in ("", "-") else None
+        pb_i = int(pb) if pb not in ("", "-") else None
+        t0_f = float(t0) - 0.000001 if t0 else None
+        t1_f = float(t1) + 0.000001 if t1 else None
+    except ValueError:
+        return None
+    use_ports = pa_i is not None and pb_i is not None and (pa_i or pb_i)
+
+    def ok(s):
+        if t0_f is not None and s["ts"] < t0_f:
+            return False
+        if t1_f is not None and s["ts"] > t1_f:
+            return False
+        src, dst = s["src"], s["dst"]
+        if use_ports:
+            sp, dp = s.get("sport"), s.get("dport")
+            return (src == a and sp == pa_i and dst == b and dp == pb_i) or (src == b and sp == pb_i and dst == a and dp == pa_i)
+        return (src == a and dst == b) or (src == b and dst == a)
+    return ok
+
+
 class LoadedCapture:
     def __init__(self, cid: str, path: str):
         self.id = cid
@@ -1302,7 +1476,7 @@ class LoadedCapture:
         d["summary"] = self.summaries[n - 1]
         return d
 
-    def query(self, proto: str = "", host: str = "", port=None, q: str = "", offset: int = 0, limit: int = 500) -> dict:
+    def query(self, proto: str = "", host: str = "", port=None, q: str = "", offset: int = 0, limit: int = 500, conn: str = "") -> dict:
         buckets = {b for b in (proto or "").lower().split(",") if b}
         host = (host or "").strip().lower()
         q = (q or "").strip().lower()
@@ -1312,10 +1486,13 @@ class LoadedCapture:
                 p = int(port)
             except ValueError:
                 p = None
+        cf = _conn_filter(conn)
         with self.lock:
             rows = self.summaries
-            if buckets or host or p or q:
+            if buckets or host or p or q or cf:
                 def ok(s):
+                    if cf and not cf(s):
+                        return False
                     if buckets and s.get("bucket") not in buckets:
                         return False
                     if host and host not in s["src"].lower() and host not in s["dst"].lower():
@@ -1360,6 +1537,7 @@ class CaptureSession:
         self.lock = threading.Lock()
         self.index: list[dict] = self._load_index()
         self.loaded: dict[str, LoadedCapture] = {}
+        self.analyses: dict[str, dict] = {}
         self.current: dict | None = None
         self._proc = None
         self._thread = None
@@ -1483,6 +1661,14 @@ class CaptureSession:
             self.index = [x for x in self.index if x["id"] != cid]
             self._save_index()
         self.loaded.pop(cid, None)
+        job = self.analyses.pop(cid, None)
+        if job:
+            job["cancel"] = True
+        for fmt in ("zeek", "json"):
+            try:
+                os.remove(os.path.join(self.dir, f"{cid}-logs-{fmt}.zip"))
+            except OSError:
+                pass
         if not e.get("external"):
             for ext in (".pcapng", ".meta.json", ".stop"):
                 try:
@@ -1761,6 +1947,75 @@ class CaptureSession:
 
     def csv(self, cid: str, **kw) -> str:
         return self.load(cid).csv(**kw)
+
+    # -- Zeek-style analysis (pcaplogs) ------------------------------------------------------
+    def analysis(self, cid: str) -> dict:
+        """State of the Zeek-style analysis of one capture (starts nothing)."""
+        a = self.analyses.get(cid)
+        if a is None:
+            return {"state": "none"}
+        out = {"state": a["state"], "progress": round(a["progress"], 3), "packets": a["packets"], "error": a.get("error"),
+               "started": a["started"]}
+        if a["state"] == "done":
+            out["summary"] = a["result"].summary()
+        return out
+
+    def analyze(self, cid: str, force: bool = False) -> dict:
+        import pcaplogs
+        if self.current and self.current["id"] == cid and self.running():
+            raise RuntimeError("Stop the recording before analysing it.")
+        path = self.path_for(cid)
+        if not os.path.isfile(path):
+            raise ValueError("The capture file is missing.")
+        a = self.analyses.get(cid)
+        if a and (a["state"] == "running" or (a["state"] == "done" and not force)):
+            return self.analysis(cid)
+        job = {"state": "running", "progress": 0.0, "packets": 0, "started": time.time(), "cancel": False, "result": None}
+        self.analyses[cid] = job
+        # keep at most 3 finished analyses in memory
+        done = [k for k, v in self.analyses.items() if v["state"] != "running" and k != cid]
+        for k in done[:-2]:
+            self.analyses.pop(k, None)
+
+        def prog(frac, n):
+            job["progress"], job["packets"] = frac, n
+
+        def work():
+            try:
+                res = pcaplogs.Analyzer(progress=prog, cancel=lambda: job["cancel"]).run(path)
+                job["result"] = res
+                job["packets"] = res.meta["packets"]
+                job["progress"] = 1.0
+                job["state"] = "done"
+            except pcaplogs.Cancelled:
+                job["state"] = "cancelled"
+            except (ValueError, OSError) as e:
+                job["state"], job["error"] = "error", str(e)
+            except Exception as e:  # keep the app alive whatever the capture contains
+                job["state"], job["error"] = "error", f"The analysis stopped: {type(e).__name__}: {e}"
+        threading.Thread(target=work, daemon=True, name="pcap-analyze").start()
+        return self.analysis(cid)
+
+    def _result(self, cid: str):
+        a = self.analyses.get(cid)
+        if not a or a["state"] != "done":
+            raise ValueError("Analyse the capture first.")
+        return a["result"]
+
+    def log_rows(self, cid: str, log: str, **kw) -> dict:
+        return self._result(cid).rows(log, **kw)
+
+    def log_text(self, cid: str, log: str, fmt: str = "zeek") -> str:
+        res = self._result(cid)
+        if log not in res.logs:
+            raise ValueError("Unknown log.")
+        return res.json_lines(log) if fmt == "json" else res.tsv(log)
+
+    def logs_zip(self, cid: str, fmt: str = "zeek") -> str:
+        res = self._result(cid)
+        path = os.path.join(self.dir, f"{cid}-logs-{fmt}.zip")
+        res.write_zip(path, fmt)
+        return path
 
     def open_in_wireshark(self, cid: str) -> bool:
         exe = find_wireshark()

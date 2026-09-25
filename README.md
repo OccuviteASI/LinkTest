@@ -9,7 +9,7 @@ tabs in one window:
 | **Scan network** | Find the devices on your network and see their names, makers, and which common ports are open. |
 | **Ping monitor** | Watch one or many addresses over time PingPlotter-style: the route hop by hop with per-hop reply times and loss, the address's own reply-time chart, outage alerts and 30 days of history. |
 | **DNS lookup** | Look up any record type for a name (or reverse for an address) against your own DNS server or public ones, side by side. |
-| **Packet capture** | Record the traffic on a connection for a set time, then browse it in plain language with easy filters, or hand the file to Wireshark. |
+| **Packet capture** | Record the traffic on a connection for a set time, then browse it in plain language with easy filters, analyse it into Zeek-style connection and protocol logs with plain-language findings, or hand the file to Wireshark. |
 | **Wi‑Fi** | See the networks around you with signal, channel, width and security, a channel-usage chart with the quietest channel, and signal over time. |
 
 **Self-contained and offline.** The executable carries its own copy of iperf3
@@ -83,6 +83,15 @@ address / port / word, and a plain-language breakdown of any packet with its
 raw bytes. Recordings are kept in the Saved captures list (rename, delete,
 save a copy, Open in Wireshark when it is installed) and you can open .pcap
 or .pcapng files made elsewhere.
+
+**Connections & findings** turns a capture into Zeek-style logs: one line per
+connection (who, how long, how much, how it ended), and logs for DNS, web,
+TLS, certificates, files, QUIC, SSH, DHCP, FTP, NTP and software versions,
+all linked by a connection ID. A "What stands out" list explains problems in
+plain language (failing connections, packet loss, DNS trouble, bad
+certificates, old encryption, cleartext passwords, rogue DHCP, IP conflicts,
+scans). Save the logs in Zeek's format or as JSON for Zeek tools, Splunk or
+Elastic, or from a terminal: `LinkTest --zeek-logs capture.pcapng`.
 
 On Windows, recording uses Npcap when Wireshark or Npcap is installed and
 needs no permission prompt. Without it, LinkTest uses Windows' built-in raw
@@ -207,6 +216,7 @@ Other flags: `--console` keeps a console window on Windows for debugging,
 | File | Purpose |
 |---|---|
 | `linktest.py` | Entry point: native window (pywebview), local HTTP server + JSON API, settings/history, version |
+| `pcaptool.py`, `pcaplogs.py`, `pcapproto.py`, `zeek_tables.py` | Packet capture and the Zeek-style analyzer (see ARCHITECTURE.md) |
 | `iperf_runner.py` | Finds the bundled iperf3, builds command lines, runs it, parses `--json-stream` and classic text output, firewall helpers |
 | `ui/index.html`, `ui/app.js`, `ui/style.css` | The interface (vanilla JS, no build step, no CDN) |
 | `fetch-helpers.py` | Downloads and pins the iperf3 builds into `bin/<platform>/` and the MAC vendor table into `assets/` |

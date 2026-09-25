@@ -3,6 +3,37 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.10.0 - 2026-09-25
+
+- Packet capture: **Connections & findings**, a Zeek-style analysis of any
+  recording or opened .pcap / .pcapng (Wireshark files included). LinkTest
+  reads the capture the way the Zeek network monitor does and writes the same
+  logs: conn (one line per connection with Zeek's states SF/S0/REJ/RSTO…,
+  history letters, bytes, packets, missed bytes, service found from the
+  content, MAC, VLAN, Community ID), dns, http, ssl (with JA3, JA3S and JA4),
+  x509, files (type, size, MD5/SHA1/SHA256), quic (server name read by
+  decrypting the Initial packet), ssh (algorithms, host key, login guess),
+  dhcp, ftp, ntp, software, known_hosts, known_services, notice and weird.
+  Checked against Zeek's own test captures and expected output.
+- "What stands out" explains findings in plain language: connections that
+  keep failing (refused or unanswered), heavy retransmission, full receive
+  buffers, DNS servers that fail or do not answer, many non-existent names,
+  expired / not-yet-valid / self-signed / name-mismatched certificates, weak
+  keys, old TLS and SSH versions, weak ciphers, passwords sent in the clear
+  (HTTP Basic, FTP, POP3, IMAP, SMTP), several DHCP servers, IP address
+  conflicts, port and address scans, SSH/FTP password guessing, traceroutes.
+- Overview of sites and services contacted, names looked up, failed
+  connections and connection outcomes; every log browsable with search,
+  sorting and all Zeek fields; click a line for every field explained,
+  "Everything about this connection" (the uid across all logs) and "Show its
+  packets" (the packet list filtered to that one connection, time window
+  included; "Show only this conversation" uses the same exact filter now).
+- Save the logs as Zeek TSV (zeek-cut, Splunk / Elastic add-ons, RITA) or JSON
+  lines in a .zip, or one log at a time. Command line:
+  `LinkTest --zeek-logs capture.pcapng [--out DIR] [--json] [--zip FILE]`.
+- The packet viewer now also reads Linux "cooked" captures (SLL / SLL2, what
+  capturing on "any" produces), stacked VLAN tags, PPPoE and MPLS.
+
 ## 0.9.0 - 2026-09-22
 
 - Ping monitor: **service checks** like Uptime Robot. Besides pinging, a

@@ -545,6 +545,49 @@
     </div>
   </section>
 
+  <section class="card hidden" id="zkCard">
+    <div class="row between wrap">
+      <div><h2 style="display:inline">Connections &amp; findings</h2> <span class="pill pill-muted" title="Groups the packets into connections and protocol logs the way the Zeek network monitor does">Zeek-style logs</span></div>
+      <div class="row wrap">
+        <button id="zkRerun" class="btn small">Analyse again</button>
+        <button id="zkSaveZeek" class="btn small" title="conn.log, dns.log, http.log… in Zeek's tab-separated format (zeek-cut, Splunk/Elastic add-ons, RITA)">Save Zeek logs (.zip)</button>
+        <button id="zkSaveJson" class="btn small" title="The same logs as JSON lines, one object per line">Save as JSON (.zip)</button>
+      </div>
+    </div>
+    <div class="hint" id="zkIntro">Every conversation in the capture becomes one line in a connection log (who talked to whom, for how long, how much, and how it ended), plus logs for web requests, name lookups, secure connections, certificates, files and more. Lines that belong together share a connection ID, so you can follow one conversation across all of them.</div>
+    <div class="progress hidden" id="zkProgress" style="margin:10px 0"><div class="bar"></div><span class="msg"></span></div>
+    <div id="zkError" class="error hidden"></div>
+    <div id="zkBody" class="hidden">
+      <div class="tiles" id="zkTiles" style="margin-top:10px"></div>
+      <div id="zkStates"></div>
+      <h3 class="zk-h">What stands out</h3>
+      <div id="zkFindings" class="zk-findings"></div>
+      <div class="zk-cols">
+        <div><h3 class="zk-h">Sites and services contacted</h3><div id="zkSites"></div></div>
+        <div><h3 class="zk-h">Names looked up</h3><div id="zkQueries"></div></div>
+        <div><h3 class="zk-h">Connections that failed</h3><div id="zkFails"></div></div>
+      </div>
+      <h3 class="zk-h" style="margin-top:14px">Logs</h3>
+      <div class="presets zk-logs" id="zkLogs" style="margin:0"></div>
+      <div class="row wrap" style="margin-top:8px">
+        <input id="zkQ" type="text" placeholder="search this log (address, name, ID…)" spellcheck="false" style="flex:1;min-width:200px">
+        <span id="zkUid" class="pill hidden"></span>
+        <label class="hint" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="zkAll"> all Zeek fields</label>
+        <button id="zkSaveLog" class="btn small" title="Save just this log as a .log file">Save this log</button>
+      </div>
+      <div class="row between wrap" style="margin-top:8px"><span id="zkPageInfo" class="hint"></span><span class="mini-chips"><button id="zkPrev">◂ Previous</button><button id="zkNext">Next ▸</button></span></div>
+      <div class="table-wrap" style="max-height:460px;overflow:auto">
+        <table class="table pkts zk-table" id="zkTable"><thead></thead><tbody></tbody></table>
+      </div>
+      <div id="zkDetail" class="detail hidden">
+        <div class="row between wrap"><h3 id="zkDetailTitle">Details</h3>
+          <div class="row wrap"><button id="zkPivot" class="btn small">Everything about this connection</button><button id="zkPackets" class="btn small">Show its packets</button><button id="zkDetailClose" class="btn small">✕</button></div></div>
+        <div id="zkPivotChips" class="presets" style="margin:6px 0 0"></div>
+        <div id="zkDetailBody"></div>
+      </div>
+    </div>
+  </section>
+
   <section class="card">
     <div class="row between wrap"><h2>Saved captures</h2><button id="pcImport" class="btn small">Open a capture file…</button></div>
     <div id="pcList" class="history-list"><p class="hint">Recordings you make are kept here.</p></div>
@@ -659,6 +702,7 @@
 
   <h3>Packet capture</h3>
   <p><b>What it is for:</b> recording the actual traffic on a network connection when you need to see exactly what a device is doing, the way Wireshark does. Choose the connection, what to record and how long, then press Start. The viewer explains each packet in plain language, lets you filter by type, address or a word, and you can hand the file to Wireshark for the full detail. On Windows the built-in Npcap engine is used when Wireshark or Npcap is installed; otherwise Windows asks for administrator permission once per recording.</p>
+  <p><b>Connections &amp; findings</b> (under the packet list) reads the capture the way the Zeek network monitor does: it groups packets into conversations and writes one line per connection, web request, name lookup, secure connection, certificate, file, SSH login, DHCP lease and so on, in Zeek's own log format. "What stands out" lists problems in plain language: connections that keep failing, heavy retransmission, DNS servers not answering, expired or self-signed certificates, old encryption, passwords sent in the clear, rogue DHCP servers, IP conflicts and scans. Click a line to see every field; "Everything about this connection" follows one conversation across all the logs, and "Show its packets" jumps to them in the packet list. "Save Zeek logs" writes conn.log, dns.log, http.log… that Zeek tools, Splunk and Elastic read directly. It also works for any .pcap or .pcapng from Wireshark (Open a capture file…). From a terminal: <code>LinkTest --zeek-logs capture.pcapng</code> writes the logs next to the file.</p>
 
   <h3>Words you may see</h3>
   <dl class="glossary">
