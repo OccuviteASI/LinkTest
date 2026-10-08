@@ -333,8 +333,15 @@
           <div class="checks" style="grid-template-columns:1fr;margin:0">
             <label><input type="checkbox" id="scanNames" checked> Look up device names</label>
             <label><input type="checkbox" id="scanSilent" checked> Check ports even if pings are ignored</label>
+            <label title="Hardware addresses only reach this computer from its own network. For devices behind a router LinkTest asks the device (NetBIOS) and the router (SNMP)."><input type="checkbox" id="scanRemoteMac" checked> Find hardware addresses on other networks</label>
           </div>
         </div>
+      </div>
+      <div class="grid2" id="scanRemoteOpts" style="margin-top:6px">
+        <div class="field"><label for="scanSnmpComm">Router SNMP community</label><input id="scanSnmpComm" type="text" spellcheck="false" autocomplete="off" value="public" placeholder="public">
+          <div class="hint">Read-only community the routers accept. Leave empty to skip asking routers.</div></div>
+        <div class="field"><label for="scanSnmpRouters">Routers to ask (optional)</label><input id="scanSnmpRouters" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 10.20.0.1, 10.20.0.254">
+          <div class="hint">The router or layer-3 switch of the scanned network. Without it LinkTest tries your gateway and the .1 / .254 of each scanned network.</div></div>
       </div>
     </details>
     <div class="row wrap" style="margin-top:8px">
@@ -693,6 +700,7 @@
 
   <h3>Scan network</h3>
   <p><b>What it is for:</b> finding out what is on your network. Press Scan and every device that answers is listed with its address, name, maker and the services (ports) it offers, such as a web page, remote desktop or file sharing. Use it to find a printer's address, spot unknown devices, or check that a device is reachable. From any row you can jump to Watch it or look up its name.</p>
+  <p><b>Devices on other networks:</b> a computer only sees hardware (MAC) addresses on its own network, because they never cross a router. For a scanned network behind a router LinkTest asks each device (Windows PCs and NAS boxes report their address over NetBIOS) and the router (its address table over SNMP, using the read-only community under Advanced options, "public" unless you change it). The Made by column says "from the device" or "from router …" for those.</p>
 
   <h3>Ping monitor</h3>
   <p><b>What it is for:</b> watching a connection over time to catch drop-outs and slow patches. Type an address and press Watch. The card shows the route hop by hop (like PingPlotter) with each router's reply time and loss, and below it the address's own reply-time chart. After three missed replies the card turns red and beeps; it turns back when replies return. History is kept for 30 days. Loss at a middle hop that does not continue to the hops after it is just that router being quiet, not a real problem.</p>

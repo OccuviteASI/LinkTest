@@ -1018,7 +1018,7 @@ def arp_report(netinfo: NetInfo, vendors: MacVendors, scan_hosts: dict | None = 
     return {"rows": rows, "conflicts": conflicts, "count": len(rows)}
 
 
-def arp_lookup(q: str, netinfo: NetInfo, vendors: MacVendors, pinger, dns: "DnsClient", scan_hosts: dict | None = None) -> dict:
+def _arp_lookup_local(q: str, netinfo: NetInfo, vendors: MacVendors, pinger, dns: "DnsClient", scan_hosts: dict | None = None) -> dict:
     q = (q or "").strip()
     if not q:
         raise ValueError("Enter a hardware (MAC) address or an IP address.")
@@ -1053,6 +1053,291 @@ def arp_lookup(q: str, netinfo: NetInfo, vendors: MacVendors, pinger, dns: "DnsC
                         f"On your local network as {mac}" if on_link else
                         ("Answers pings but is not on your local network (reached through the router), so it has no hardware address here." if ping and ping.status == "ok"
                          else "No hardware address known and no reply to a ping: the device is off, blocking pings, or on another network."))}
+
+
+# ----------------------------------------------------------------------------
+# Hardware addresses of devices on OTHER networks
+# ----------------------------------------------------------------------------
+# A computer only learns MAC addresses of devices on its own network segment (ARP never
+# crosses a router), so for a remote subnet the ARP table only ever holds the router's MAC.
+# Two things can still tell us a remote device's MAC:
+#   * the device itself, if it speaks NetBIOS (Windows PCs, Samba/NAS boxes): a Node Status
+#     query (UDP 137) returns its names and its adapter address;
+#   * the router for that subnet, if SNMP is enabled: its ARP table (ipNetToMedia /
+#     ipNetToPhysical) maps every recently active IP on the subnet to its MAC.
+
+def netbios_status(ip: str, timeout: float = 0.8) -> dict | None:
+    """NetBIOS Node Status (nbstat) query. -> {mac, name, workgroup, names} or None.
+
+    Samba usually reports an all-zero MAC; that comes back as mac=None (names still useful).
+    """
+    tid = os.urandom(2)
+    name = bytes([0x20]) + b"CK" + b"AA" * 15 + b"\x00"       # "*" padded with NULs, first-level encoded
+    req = tid + b"\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00" + name + b"\x00\x21\x00\x01"
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.settimeout(timeout)
+        s.sendto(req, (ip, 137))
+        end = time.time() + timeout
+        while True:
+            left = end - time.time()
+            if left <= 0:
+                return None
+            s.settimeout(left)
+            data, addr = s.recvfrom(2048)
+            if addr[0] == ip and data[:2] == tid:
+                break
+    except OSError:
+        return None
+    finally:
+        s.close()
+    return parse_nbstat(data)
+
+
+def parse_nbstat(data: bytes) -> dict | None:
+    """Parse a NetBIOS Node Status response. -> {mac, name, workgroup, names} or None."""
+    try:
+        off = 12
+        off += 2 if data[off] & 0xC0 == 0xC0 else data[off] + 2  # answer name (34 bytes, or a pointer)
+        off += 10                                                 # type, class, ttl, rdlength
+        n = data[off]
+        off += 1
+        names, host, group = [], None, None
+        for _ in range(n):
+            raw = data[off:off + 18]
+            if len(raw) < 18:
+                break
+            nm = raw[:15].decode("latin-1").rstrip(" \x00")
+            suffix, flags = raw[15], (raw[16] << 8) | raw[17]
+            is_group = bool(flags & 0x8000)
+            names.append({"name": nm, "suffix": suffix, "group": is_group})
+            if suffix == 0x00 and not is_group and host is None:
+                host = nm
+            elif suffix == 0x00 and is_group and group is None:
+                group = nm
+            off += 18
+        mac_b = data[off:off + 6]
+        mac = ":".join(f"{b:02X}" for b in mac_b) if len(mac_b) == 6 and any(mac_b) else None
+        return {"mac": mac, "name": host, "workgroup": group, "names": names}
+    except IndexError:
+        return None
+
+
+def _ber_len(n: int) -> bytes:
+    if n < 0x80:
+        return bytes([n])
+    b = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return bytes([0x80 | len(b)]) + b
+
+
+def _ber(tag: int, body: bytes) -> bytes:
+    return bytes([tag]) + _ber_len(len(body)) + body
+
+
+def _ber_int(v: int) -> bytes:
+    return _ber(0x02, v.to_bytes(max(1, (v.bit_length() + 8) // 8), "big", signed=True))
+
+
+def _ber_oid(oid: str) -> bytes:
+    p = [int(x) for x in oid.strip(".").split(".")]
+    out = bytearray([40 * p[0] + p[1]])
+    for v in p[2:]:
+        chunk = [v & 0x7F]
+        v >>= 7
+        while v:
+            chunk.append(0x80 | (v & 0x7F))
+            v >>= 7
+        out += bytes(reversed(chunk))
+    return _ber(0x06, bytes(out))
+
+
+def _ber_read(b: bytes, off: int) -> tuple[int, int, int]:
+    """-> (tag, value_start, value_end)."""
+    tag = b[off]
+    ln = b[off + 1]
+    off += 2
+    if ln & 0x80:
+        k = ln & 0x7F
+        ln = int.from_bytes(b[off:off + k], "big")
+        off += k
+    return tag, off, off + ln
+
+
+def _oid_str(b: bytes) -> str:
+    parts = [str(b[0] // 40), str(b[0] % 40)]
+    v = 0
+    for x in b[1:]:
+        v = (v << 7) | (x & 0x7F)
+        if not x & 0x80:
+            parts.append(str(v))
+            v = 0
+    return ".".join(parts)
+
+
+class SnmpClient:
+    """Tiny SNMP v2c client (GET / GETBULK walk) - enough to read a router's ARP table."""
+
+    def __init__(self, host: str, community: str = "public", timeout: float = 1.0, retries: int = 1):
+        self.host, self.community, self.timeout, self.retries = host, community, timeout, retries
+
+    def _request(self, pdu_tag: int, oid: str, max_rep: int = 0) -> list[tuple[str, int, bytes]] | None:
+        rid = int.from_bytes(os.urandom(3), "big")
+        vb = _ber(0x30, _ber(0x30, _ber_oid(oid) + b"\x05\x00"))
+        pdu = _ber(pdu_tag, _ber_int(rid) + _ber_int(0) + _ber_int(max_rep) + vb)
+        msg = _ber(0x30, _ber_int(1) + _ber(0x04, self.community.encode()) + pdu)
+        for _ in range(self.retries + 1):
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.settimeout(self.timeout)
+                s.sendto(msg, (self.host, 161))
+                data, _addr = s.recvfrom(65535)
+            except OSError:
+                continue
+            finally:
+                s.close()
+            try:
+                _t, s0, _e = _ber_read(data, 0)
+                _t, a, b = _ber_read(data, s0)          # version
+                _t, a, b = _ber_read(data, b)           # community
+                _t, ps, _pe = _ber_read(data, b)        # response PDU
+                _t, a, b = _ber_read(data, ps)          # request id
+                if int.from_bytes(data[a:b], "big") != rid:
+                    continue
+                _t, a, b = _ber_read(data, b)           # error status
+                if int.from_bytes(data[a:b], "big"):
+                    return None
+                _t, a, b = _ber_read(data, b)           # error index
+                _t, ls, le = _ber_read(data, b)         # varbind list
+                out = []
+                while ls < le:
+                    _t, vs, ve = _ber_read(data, ls)
+                    _t, oa, ob = _ber_read(data, vs)
+                    vt, va, vbnd = _ber_read(data, ob)
+                    out.append((_oid_str(data[oa:ob]), vt, data[va:vbnd]))
+                    ls = ve
+                return out
+            except (IndexError, ValueError):
+                return None
+        return None
+
+    def get(self, oid: str) -> bytes | None:
+        r = self._request(0xA0, oid)
+        if not r or r[0][1] in (0x80, 0x81, 0x82):
+            return None
+        return r[0][2]
+
+    def walk(self, prefix: str, limit: int = 20000):
+        oid = prefix
+        n = 0
+        while n < limit:
+            r = self._request(0xA5, oid, max_rep=40)
+            if not r:
+                return
+            for o, t, v in r:
+                if not o.startswith(prefix + ".") or t in (0x80, 0x81, 0x82):
+                    return
+                yield o, v
+                n += 1
+                oid = o
+
+
+OID_SYSNAME = "1.3.6.1.2.1.1.5.0"
+OID_SYSDESCR = "1.3.6.1.2.1.1.1.0"
+OID_IPNETTOMEDIA_PHYS = "1.3.6.1.2.1.4.22.1.2"      # ifIndex.a.b.c.d -> MAC
+OID_IPNETTOPHYSICAL_PHYS = "1.3.6.1.2.1.4.35.1.4"   # ifIndex.addrType.len.a.b.c.d -> MAC
+OID_IFPHYSADDRESS = "1.3.6.1.2.1.2.2.1.6"           # ifIndex -> MAC of the router's own interface
+OID_IPADENTIFINDEX = "1.3.6.1.2.1.4.20.1.2"         # a.b.c.d -> ifIndex (the router's own addresses)
+
+
+def snmp_arp_table(host: str, community: str = "public", timeout: float = 1.0) -> dict | None:
+    """Read a router's / layer-3 switch's ARP table over SNMP v2c.
+
+    -> {"router": host, "name": sysName, "descr": sysDescr, "entries": {ip: MAC}} or None when the
+    device does not answer SNMP with this community.
+    """
+    c = SnmpClient(host, community, timeout)
+    name = c.get(OID_SYSNAME)
+    if name is None:
+        return None
+    descr = c.get(OID_SYSDESCR)
+    entries: dict[str, str] = {}
+    for oid, val in c.walk(OID_IPNETTOMEDIA_PHYS):
+        parts = oid.split(".")
+        if len(val) == 6 and any(val):
+            entries[".".join(parts[-4:])] = ":".join(f"{b:02X}" for b in val)
+    if not entries:
+        for oid, val in c.walk(OID_IPNETTOPHYSICAL_PHYS):
+            parts = oid[len(OID_IPNETTOPHYSICAL_PHYS) + 1:].split(".")
+            if len(parts) >= 7 and parts[1] == "1" and len(val) == 6 and any(val):
+                entries[".".join(parts[-4:])] = ":".join(f"{b:02X}" for b in val)
+    # the router's own addresses are not in its ARP table: map ipAdEntIfIndex -> ifPhysAddress
+    if_mac = {}
+    for oid, val in c.walk(OID_IFPHYSADDRESS):
+        if len(val) == 6 and any(val):
+            if_mac[oid.rsplit(".", 1)[1]] = ":".join(f"{b:02X}" for b in val)
+    own = {}
+    if if_mac:
+        for oid, val in c.walk(OID_IPADENTIFINDEX):
+            ip = oid[len(OID_IPADENTIFINDEX) + 1:]
+            mac = if_mac.get(str(int.from_bytes(val, "big"))) if val else None
+            if mac and is_ipv4(ip):
+                own[ip] = mac
+    for ip, mac in own.items():
+        entries.setdefault(ip, mac)
+    return {"router": host, "own": sorted(own), "name": name.decode("utf-8", "replace") or None,
+            "descr": (descr or b"").decode("utf-8", "replace").splitlines()[0][:120] if descr else None, "entries": entries}
+
+
+def remote_router_candidates(ips: list[str], netinfo: "NetInfo", extra: list[str] | None = None) -> list[str]:
+    """Where to ask for an ARP table: routers the user named, this computer's gateways, and the
+    usual router addresses (.1 / .254) of each /24 the remote addresses sit in."""
+    out: list[str] = []
+
+    def add(x):
+        if x and is_ipv4(x) and x not in out:
+            out.append(x)
+    for x in extra or []:
+        add(x)
+    try:
+        for i in netinfo.interfaces():
+            add(i.get("gateway"))
+    except Exception:
+        pass
+    for ip in ips:
+        base = ip.rsplit(".", 1)[0]
+        add(base + ".1")
+        add(base + ".254")
+    return out[:12]
+
+
+def arp_lookup(q: str, netinfo: NetInfo, vendors: MacVendors, pinger, dns: "DnsClient", scan_hosts: dict | None = None,
+               community: str = "public", routers: list[str] | None = None) -> dict:
+    """arp_lookup plus the remote fallbacks: when the address is on another network, ask the
+    device (NetBIOS) and then the routers (SNMP) for its hardware address."""
+    r = _arp_lookup_local(q, netinfo, vendors, pinger, dns, scan_hosts)
+    if r.get("type") != "ip" or r.get("mac") or r.get("own"):
+        return r
+    ip = r["ip"]
+    nb = netbios_status(ip, 1.0)
+    if nb and nb.get("name") and not r.get("hostname"):
+        r["hostname"] = nb["name"]
+    if nb and nb.get("mac"):
+        mac, src = nb["mac"], "NetBIOS (the device reported it)"
+    else:
+        mac = src = None
+        if community:
+            for router in remote_router_candidates([ip], netinfo, routers):
+                t = snmp_arp_table(router, community, 1.0)
+                if t and ip in t["entries"]:
+                    mac, src = t["entries"][ip], f"SNMP ARP table of {t.get('name') or router} ({router})"
+                    break
+    if mac:
+        r.update(mac=mac, vendor=vendors.lookup(mac), macKind=mac_kind(mac)["kind"], macSource=src,
+                 summary=f"On another network; hardware address {mac} from {src}.")
+    elif nb:
+        r["summary"] += f" NetBIOS name {nb.get('name') or '?'}" + (f" (workgroup {nb['workgroup']})" if nb.get("workgroup") else "") + \
+            ", but it did not report a hardware address."
+    return r
 
 
 # ----------------------------------------------------------------------------
@@ -1312,6 +1597,7 @@ class Scanner:
         self.total = 0
         self.done = 0
         self.alive = 0
+        self.mac_sources: dict = {}
         self.intercepted: set[int] = set()   # ports a middlebox answers for every address (DNS interception etc.)
         self.started_at = None
         self.finished_at = None
@@ -1347,7 +1633,11 @@ class Scanner:
         self.opts = {"range": opts.get("range", ""), "ports": ports, "timeoutMs": timeout_ms,
                      "tcpTimeoutMs": tcp_timeout, "retries": int(opts.get("retries", 1)),
                      "resolveNames": bool(opts.get("resolveNames", True)),
-                     "portsOnSilent": bool(opts.get("portsOnSilent", True)), "concurrency": conc}
+                     "portsOnSilent": bool(opts.get("portsOnSilent", True)), "concurrency": conc,
+                     "remoteMacs": bool(opts.get("remoteMacs", True)),
+                     "snmpCommunity": str(opts.get("snmpCommunity") if opts.get("snmpCommunity") is not None else "public").strip()[:64],
+                     "snmpRouters": [x for x in re.split(r"[\s,;]+", str(opts.get("snmpRouters") or "")) if is_ipv4(x)][:8]}
+        self.mac_sources: dict = {}
         with self.lock:
             self.hosts = {}
             self.intercepted = set()
@@ -1482,13 +1772,87 @@ class Scanner:
                         h["alive"] = True
                         h["status"] = "arp"
                         self.alive += 1
+            for h in self.hosts.values():
+                if h.get("mac") and not h.get("macSource"):
+                    h["macSource"] = "arp"
+        if self.opts.get("remoteMacs") and not self._cancel.is_set():
+            self._remote_macs()
+        with self.lock:
             self.finished_at = time.time()
             elapsed = self.finished_at - (self.started_at or self.finished_at)
-            macs = {ip: {"mac": h["mac"], "vendor": h.get("vendor")} for ip, h in self.hosts.items() if h.get("mac")}
+            macs = {ip: {"mac": h["mac"], "vendor": h.get("vendor"), "macSource": h.get("macSource"), "hostname": h.get("hostname"),
+                         "netbios": h.get("netbios")}
+                    for ip, h in self.hosts.items() if h.get("mac") or h.get("netbios")}
             dups = self._dup_macs()
-        self.log.push({"type": "arp", "hosts": macs, "dupMacs": dups})
+        self.log.push({"type": "arp", "hosts": macs, "dupMacs": dups, "macSources": self.mac_sources})
         self.log.push({"type": "done", "cancelled": self._cancel.is_set(), "elapsed": round(elapsed, 1),
                        "alive": self.alive, "done": self.done, "total": self.total, "dupMacs": dups})
+
+    def _remote_macs(self) -> None:
+        """MACs for devices the ARP table cannot know: ones on other networks (behind a router).
+
+        1. NetBIOS node status to every answering device without a MAC (Windows, Samba/NAS);
+        2. SNMP ARP tables of the routers (named ones, this computer's gateways, .1/.254 of the
+           remote /24s): fills the rest, and finds devices that ignored pings but talked recently.
+        """
+        with self.lock:
+            local_nets = []
+            for i in self.netinfo.interfaces():
+                try:
+                    local_nets.append(ipaddress.ip_network(f"{i['ip']}/{i.get('prefix') or 24}", strict=False))
+                except (ValueError, KeyError):
+                    pass
+            remote = [h for h in self.hosts.values() if not h.get("mac") and
+                      not any(ipaddress.ip_address(h["ip"]) in n for n in local_nets)]
+        if not remote:
+            return
+        answering = [h for h in remote if h["alive"]]
+        self.log.push({"type": "phase", "text": f"Asking {len(answering)} device(s) on other networks for their hardware address (NetBIOS)…"})
+        nb_found = 0
+        if answering:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(64, len(answering))) as ex:
+                results = list(ex.map(lambda h: (h, netbios_status(h["ip"], 0.8)), answering))
+            with self.lock:
+                for h, r in results:
+                    if not r:
+                        continue
+                    h["netbios"] = {"name": r.get("name"), "workgroup": r.get("workgroup")}
+                    if r.get("name") and not h.get("hostname"):
+                        h["hostname"] = r["name"]
+                    if r.get("mac"):
+                        h["mac"], h["vendor"], h["macSource"] = r["mac"], self.vendors.lookup(r["mac"]), "netbios"
+                        nb_found += 1
+        self.mac_sources["netbios"] = nb_found
+        with self.lock:
+            still = [h for h in remote if not h.get("mac")]
+        community = self.opts.get("snmpCommunity")
+        if not still or not community or self._cancel.is_set():
+            return
+        routers = remote_router_candidates(sorted({h["ip"] for h in still}, key=lambda x: tuple(int(p) for p in x.split("."))),
+                                           self.netinfo, self.opts.get("snmpRouters"))
+        self.log.push({"type": "phase", "text": f"Asking routers for their address tables (SNMP, community \"{community}\")…"})
+        tables = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(routers) or 1) as ex:
+            for t in ex.map(lambda r: snmp_arp_table(r, community, 1.0), routers):
+                if t and t["entries"]:
+                    tables.append(t)
+        snmp_found = 0
+        with self.lock:
+            for t in tables:
+                for h in self.hosts.values():
+                    if h.get("mac") or h["ip"] not in t["entries"]:
+                        continue
+                    mac = t["entries"][h["ip"]]
+                    h["mac"], h["vendor"] = mac, self.vendors.lookup(mac)
+                    h["macSource"] = f"snmp:{t['router']}"
+                    snmp_found += 1
+                    if not h["alive"]:
+                        h["alive"], h["status"] = True, "routerarp"
+                        self.alive += 1
+        self.mac_sources["snmp"] = snmp_found
+        self.mac_sources["routers"] = [{"ip": t["router"], "name": t.get("name"), "descr": t.get("descr"), "entries": len(t["entries"])}
+                                       for t in tables]
+        self.mac_sources["routersTried"] = routers
 
     def _dup_macs(self) -> dict:
         """{mac: [ips]} for hardware addresses seen on more than one answering address (call with the lock held)."""
@@ -1537,7 +1901,7 @@ class Scanner:
         import io
         buf = io.StringIO()
         w = csv.writer(buf, lineterminator="\n")
-        w.writerow(["ip", "alive", "hostname", "mac", "vendor", "rtt_ms", "status", "open_ports", "note"])
+        w.writerow(["ip", "alive", "hostname", "mac", "vendor", "mac_source", "rtt_ms", "status", "open_ports", "note"])
         with self.lock:
             rows = sorted(self.hosts.values(), key=lambda h: h["n"])
             dups = self._dup_macs()
@@ -1547,8 +1911,10 @@ class Scanner:
             note = (f"same hardware address as {', '.join(ip for ip in shared if ip != h['ip'])}; " if shared else "") + ("only answered on intercepted port(s) " + " ".join(map(str, inter)) + "; probably no device") if h.get("phantom") else \
                    ("port(s) " + " ".join(map(str, inter)) + " intercepted by the network") if inter else \
                    ("no ping reply but refused a connection" if h.get("status") == "refused" else "")
+            src = h.get("macSource") or ""
+            src = "NetBIOS (device)" if src == "netbios" else f"SNMP router {src[5:]}" if src.startswith("snmp:") else "ARP" if src == "arp" else ""
             w.writerow([h["ip"], "yes" if h["alive"] else "no", h.get("hostname") or "", h.get("mac") or "",
-                        h.get("vendor") or "", h["rtt"] if h["rtt"] is not None else "", h["status"],
+                        h.get("vendor") or "", src, h["rtt"] if h["rtt"] is not None else "", h["status"],
                         " ".join(str(p) for p in h["ports"]), note])
         return buf.getvalue()
 

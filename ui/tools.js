@@ -48,6 +48,9 @@ async function scanEnsureNet(force) {
   if (o.retries != null) $('#scanRetries').value = o.retries;
   if (o.resolveNames != null) $('#scanNames').checked = !!o.resolveNames;
   if (o.portsOnSilent != null) $('#scanSilent').checked = !!o.portsOnSilent;
+  if (o.remoteMacs != null) $('#scanRemoteMac').checked = !!o.remoteMacs;
+  if (o.snmpCommunity != null) $('#scanSnmpComm').value = o.snmpCommunity;
+  if (o.snmpRouters != null) $('#scanSnmpRouters').value = Array.isArray(o.snmpRouters) ? o.snmpRouters.join(', ') : o.snmpRouters;
   if (r.pinger === 'ping-cli') $('#scanRangeHint').textContent += ' Pings use the system ping tool on this computer, so scans are slower than usual.';
   scanPresetReflect();
 }
@@ -127,7 +130,8 @@ function scanSetRunning(on) {
 async function scanStart() {
   const err = $('#scanError'); err.classList.add('hidden');
   const opts = { range: $('#scanRange').value.trim(), ports: $('#scanPorts').value.trim(), timeoutMs: +$('#scanTimeout').value || 1000,
-    retries: +$('#scanRetries').value || 0, resolveNames: $('#scanNames').checked, portsOnSilent: $('#scanSilent').checked };
+    retries: +$('#scanRetries').value || 0, resolveNames: $('#scanNames').checked, portsOnSilent: $('#scanSilent').checked,
+    remoteMacs: $('#scanRemoteMac').checked, snmpCommunity: $('#scanSnmpComm').value.trim(), snmpRouters: $('#scanSnmpRouters').value.trim() };
   const r = await api('/api/scan/start', opts);
   if (r.error) { err.textContent = r.error; err.classList.remove('hidden'); return; }
   SC.hosts.clear(); SC.seq = 0; SC.total = r.total; SC.done = 0; SC.alive = 0; SC.estimate = r.estimateS; SC.dupMacs = {};
@@ -148,12 +152,13 @@ async function scanPoll() {
   for (const e of r.events) {
     SC.seq = e.seq;
     switch (e.type) {
-      case 'start': SC.total = e.total; SC.estimate = e.estimateS; SC.intercepted = []; scanNote(); break;
+      case 'start': SC.total = e.total; SC.estimate = e.estimateS; SC.intercepted = []; SC.phase = ''; SC.macSources = null; scanNote(); break;
+      case 'phase': SC.phase = e.text || ''; break;
       case 'intercept': SC.intercepted = e.ports || []; scanNote(); changed = true; break;
       case 'host': SC.hosts.set(e.ip, Object.assign(SC.hosts.get(e.ip) || { ports: [] }, { ip: e.ip, n: e.n, alive: e.alive, rtt: e.rtt, status: e.status })); changed = true; break;
       case 'detail': Object.assign(SC.hosts.get(e.ip) || SC.hosts.set(e.ip, { ip: e.ip, n: 1e9 }).get(e.ip), { alive: e.alive, status: e.status, ports: e.ports, hostname: e.hostname, interceptedPorts: e.interceptedPorts || [], phantom: !!e.phantom, refused: !!e.refused }); changed = true; break;
       case 'progress': SC.done = e.done; SC.alive = e.alive; break;
-      case 'arp': for (const [ip, m] of Object.entries(e.hosts || {})) { const h = SC.hosts.get(ip); if (h) { h.mac = m.mac; h.vendor = m.vendor; if (!h.alive) { h.alive = true; h.status = 'arp'; } changed = true; } } SC.dupMacs = e.dupMacs || {}; break;
+      case 'arp': for (const [ip, m] of Object.entries(e.hosts || {})) { const h = SC.hosts.get(ip); if (h) { if (m.mac) { h.mac = m.mac; h.vendor = m.vendor; h.macSource = m.macSource; if (!h.alive) { h.alive = true; h.status = (m.macSource || '').startsWith('snmp:') ? 'routerarp' : 'arp'; } } if (m.hostname && !h.hostname) h.hostname = m.hostname; if (m.netbios) h.netbios = m.netbios; changed = true; } } SC.dupMacs = e.dupMacs || {}; SC.macSources = e.macSources || null; SC.phase = ''; break;
       case 'done': SC.done = e.done; SC.alive = e.alive; scanSetRunning(false); clearInterval(SC.timer); SC.timer = null;
         SC.dupMacs = e.dupMacs || SC.dupMacs;
         { const nd = Object.keys(SC.dupMacs || {}).length;
@@ -174,11 +179,34 @@ function scanDupWarn() {
   }).join('') + '</ul>';
   el.classList.remove('hidden');
 }
+function scanMacSrc(h) {
+  const s = h.macSource || '';
+  if (s === 'netbios') return ' <span class="soft" title="Reported by the device itself over NetBIOS (it is on another network, so ARP cannot see it)">· from the device</span>';
+  if (s.startsWith('snmp:')) return ` <span class="soft" title="Read from the ARP table of router ${esc(s.slice(5))} over SNMP">· from router ${esc(s.slice(5))}</span>`;
+  return '';
+}
+function scanRemoteNote() {
+  const ms = SC.macSources; if (!ms || SC.running) return '';
+  const remote = [...SC.hosts.values()].filter(h => h.alive && !h.mac && h.ip !== (T.net && T.net.default.interface && T.net.default.interface.ip));
+  const parts = [];
+  if (ms.netbios) parts.push(`${ms.netbios} reported by the devices themselves (NetBIOS)`);
+  if (ms.snmp) parts.push(`${ms.snmp} read from ${(ms.routers || []).map(r => r.name ? `${r.name} (${r.ip})` : r.ip).join(', ')} over SNMP`);
+  let t = parts.length ? `Hardware addresses on other networks: ${parts.join('; ')}. ` : '';
+  if (remote.length && ms.routersTried) {
+    const n = remote.length, pl = n === 1 ? '' : 's';
+    t += `${n} answering device${pl} on another network still ha${n === 1 ? 's' : 've'} no hardware address: ARP only works on your own network and ${n === 1 ? 'it' : 'they'} did not answer NetBIOS. `;
+    if ((ms.routers || []).length) t += `${n === 1 ? 'It is' : 'They are'} not in the address table of ${(ms.routers || []).map(r => r.ip).join(', ')} either (a device that has been quiet for a while drops out of it); if another router serves that network, add it under Advanced options.`;
+    else t += `No router answered SNMP${$('#scanSnmpComm').value.trim() ? ` with community "${$('#scanSnmpComm').value.trim()}"` : ' (no community set)'} (tried ${ms.routersTried.slice(0, 4).join(', ')}${ms.routersTried.length > 4 ? '…' : ''}). ` +
+      'Enter the router\'s read-only community and address under Advanced options, or run the scan from a computer on that network.';
+  }
+  return t;
+}
 function scanNote() {
   const el = $('#scanNote'); const ps = SC.intercepted || [];
-  if (!ps.length) { el.classList.add('hidden'); el.textContent = ''; return; }
+  const rn = scanRemoteNote();
+  if (!ps.length) { el.classList.toggle('hidden', !rn); el.textContent = rn; return; }
   const names = ps.map(p => `${p}${SC.portNames[p] ? ' (' + SC.portNames[p] + ')' : ''}`).join(', ');
-  el.textContent = `Port ${names} answers on every address in this range: the network (usually the gateway) intercepts it, so it is not proof that a device exists. Addresses that only answered there are treated as empty and hidden by "Only devices that answered"; on real devices that port is shown crossed out.`;
+  el.textContent = `Port ${names} answers on every address in this range: the network (usually the gateway) intercepts it, so it is not proof that a device exists. Addresses that only answered there are treated as empty and hidden by "Only devices that answered"; on real devices that port is shown crossed out.` + (rn ? ' ' + rn : '');
   el.classList.remove('hidden');
 }
 function scanProgress() {
@@ -187,7 +215,7 @@ function scanProgress() {
   p.classList.remove('hidden');
   const pct = Math.round(SC.done / SC.total * 100);
   $('.bar', p).style.width = pct + '%';
-  $('.msg', p).textContent = SC.running ? `Checked ${SC.done} of ${SC.total} addresses · ${SC.alive} answering${SC.estimate ? ` · about ${Math.round(SC.estimate)} s in total` : ''}` : `Checked ${SC.done} of ${SC.total} addresses · ${SC.alive} answering`;
+  $('.msg', p).textContent = SC.running && SC.phase ? SC.phase : SC.running ? `Checked ${SC.done} of ${SC.total} addresses · ${SC.alive} answering${SC.estimate ? ` · about ${Math.round(SC.estimate)} s in total` : ''}` : `Checked ${SC.done} of ${SC.total} addresses · ${SC.alive} answering`;
 }
 const ipNum = ip => (ip || '').split('.').reduce((a, b) => a * 256 + (+b || 0), 0);
 function scanRender() {
@@ -206,10 +234,10 @@ function scanRender() {
   $$('#scanTable th').forEach(th => { th.classList.toggle('sorted', th.dataset.k === k); th.classList.toggle('asc', th.dataset.k === k && SC.sortAsc); });
   tb.innerHTML = rows.map(h => {
     const ports = (h.ports || []).map(p => { const ic = (SC.intercepted || []).includes(p); return `<span class="chip port ${ic ? 'intercepted' : ''}" ${ic ? 'title="Answered by the network (intercepted), not necessarily by this device"' : ''}>${p}${SC.portNames[p] ? `<small>${esc(SC.portNames[p])}</small>` : ''}</span>`; }).join('');
-    const ping = h.rtt != null ? fmtMs(h.rtt) : (h.status === 'tcp' ? 'ports only' : h.status === 'arp' ? 'seen (ARP)' : h.status === 'refused' ? 'no ping, but refused a connection' : h.status === 'intercepted' ? 'only intercepted port(s)' : h.alive ? '' : 'no answer');
+    const ping = h.rtt != null ? fmtMs(h.rtt) : (h.status === 'tcp' ? 'ports only' : h.status === 'arp' ? 'seen (ARP)' : h.status === 'routerarp' ? 'no ping; in the router\'s address table' : h.status === 'refused' ? 'no ping, but refused a connection' : h.status === 'intercepted' ? 'only intercepted port(s)' : h.alive ? '' : 'no answer');
     const dupIps = h.mac && SC.dupMacs[(h.mac || '').toUpperCase()] ? SC.dupMacs[h.mac.toUpperCase()].filter(x => x !== h.ip) : [];
     return `<tr class="${h.alive ? '' : 'dim'} ${dupIps.length ? 'dup' : ''}" data-ip="${esc(h.ip)}"><td class="mono">${esc(h.ip)}${h.ip === (T.net && T.net.default.interface && T.net.default.interface.ip) ? '<span class="sub">this computer</span>' : ''}</td>` +
-      `<td>${esc(h.hostname || '')}</td><td>${esc(h.vendor || '')}${h.mac ? `<span class="sub mono">${esc(h.mac)}</span>` : ''}${dupIps.length ? `<span class="badge warn" title="The same hardware address answers for ${esc(dupIps.join(', '))}">⚠ also ${esc(dupIps.slice(0, 2).join(', '))}${dupIps.length > 2 ? ` +${dupIps.length - 2}` : ''}</span>` : ''}</td>` +
+      `<td>${esc(h.hostname || '')}</td><td>${esc(h.vendor || '')}${h.mac ? `<span class="sub mono">${esc(h.mac)}${scanMacSrc(h)}</span>` : ''}${dupIps.length ? `<span class="badge warn" title="The same hardware address answers for ${esc(dupIps.join(', '))}">⚠ also ${esc(dupIps.slice(0, 2).join(', '))}${dupIps.length > 2 ? ` +${dupIps.length - 2}` : ''}</span>` : ''}</td>` +
       `<td>${esc(ping)}</td><td>${ports || (h.alive ? '<span class="hint">none of the checked ports</span>' : '')}</td>` +
       `<td class="rowbtns"><button class="btn small" data-act="watch" title="Add to Ping monitor">Watch</button><button class="btn small" data-act="arp" title="Hardware address details">ARP</button><button class="btn small" data-act="dns" title="Reverse DNS lookup">DNS</button></td></tr>`;
   }).join('');

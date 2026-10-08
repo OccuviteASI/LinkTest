@@ -3,6 +3,24 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.11.0 - 2026-10-08
+
+- Scan network: **hardware (MAC) addresses for devices on other networks.**
+  ARP only works inside your own network, so a scan of a subnet behind a
+  router used to show no MACs at all. After the scan LinkTest now asks:
+  - the device itself over **NetBIOS** (Windows PCs, NAS boxes): it reports
+    its adapter address and its name, even across routers;
+  - the **router** of that network over **SNMP** (read-only community,
+    "public" by default, set under Advanced options together with the router
+    addresses; otherwise your gateway and the .1 / .254 of each scanned
+    network are tried): its ARP table gives every recently active device's
+    MAC, including devices that ignore pings ("no ping; in the router's
+    address table"), plus the router's own interface MACs.
+  Each MAC says where it came from (from the device / from router x.x.x.x),
+  the CSV has a mac_source column, and a note explains any device still
+  without a MAC and what to set. The ARP card's IP lookup uses the same
+  fallbacks. Option "Find hardware addresses on other networks" (on).
+
 ## 0.10.0 - 2026-09-25
 
 - Packet capture: **Connections & findings**, a Zeek-style analysis of any

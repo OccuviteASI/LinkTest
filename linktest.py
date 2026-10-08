@@ -31,7 +31,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -574,7 +574,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/scan/start":
                 res = app.scanner.start(body)
                 app.settings.update(scanRange=body.get("range", ""), scanPorts=app.scanner.opts["ports"],
-                                    scanOpts={k: app.scanner.opts[k] for k in ("timeoutMs", "retries", "resolveNames", "portsOnSilent")})
+                                    scanOpts={k: app.scanner.opts[k] for k in ("timeoutMs", "retries", "resolveNames", "portsOnSilent",
+                                                                               "remoteMacs", "snmpCommunity", "snmpRouters")})
                 app.save_settings()
                 return self._json({"ok": True, **res})
             if p == "/api/scan/stop":
@@ -600,7 +601,9 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/arp/lookup":
                 with app.scanner.lock:
                     hosts = dict(app.scanner.hosts)
-                return self._json({"ok": True, **nt.arp_lookup(str(body.get("q", "")), app.netinfo, app.vendors, app.pinger, app.dns, hosts)})
+                return self._json({"ok": True, **nt.arp_lookup(str(body.get("q", "")), app.netinfo, app.vendors, app.pinger, app.dns, hosts,
+                                                                    community=(app.settings.get("scanOpts") or {}).get("snmpCommunity", "public"),
+                                                                    routers=(app.settings.get("scanOpts") or {}).get("snmpRouters") or [])})
             # -- wi-fi --
             if p == "/api/wifi/start":
                 app.wifi.start()
