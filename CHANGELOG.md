@@ -9,8 +9,12 @@ All notable changes to LinkTest. The version number is defined once, in
   ARP only works inside your own network, so a scan of a subnet behind a
   router used to show no MACs at all. After the scan LinkTest now asks:
   - the device itself over **NetBIOS** (Windows PCs, NAS boxes): it reports
-    its adapter address and its name, even across routers;
-  - the **router** of that network over **SNMP** (read-only community,
+    its adapter address and its name, even across routers. This is how Angry
+    IP Scanner and Advanced IP Scanner get remote MACs, needs no setup, and
+    is sent to every address in the remote range, so a PC that ignores pings
+    but answers NetBIOS is found too ("no ping; answered NetBIOS");
+  - optionally the **router** of that network over **SNMP**, for devices
+    that do not speak NetBIOS (printers, phones, Linux) (read-only community,
     "public" by default, set under Advanced options together with the router
     addresses; otherwise your gateway and the .1 / .254 of each scanned
     network are tried): its ARP table gives every recently active device's

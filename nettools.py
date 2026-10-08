@@ -1781,7 +1781,7 @@ class Scanner:
             self.finished_at = time.time()
             elapsed = self.finished_at - (self.started_at or self.finished_at)
             macs = {ip: {"mac": h["mac"], "vendor": h.get("vendor"), "macSource": h.get("macSource"), "hostname": h.get("hostname"),
-                         "netbios": h.get("netbios")}
+                         "netbios": h.get("netbios"), "status": h.get("status"), "alive": h.get("alive")}
                     for ip, h in self.hosts.items() if h.get("mac") or h.get("netbios")}
             dups = self._dup_macs()
         self.log.push({"type": "arp", "hosts": macs, "dupMacs": dups, "macSources": self.mac_sources})
@@ -1806,12 +1806,15 @@ class Scanner:
                       not any(ipaddress.ip_address(h["ip"]) in n for n in local_nets)]
         if not remote:
             return
-        answering = [h for h in remote if h["alive"]]
-        self.log.push({"type": "phase", "text": f"Asking {len(answering)} device(s) on other networks for their hardware address (NetBIOS)…"})
-        nb_found = 0
-        if answering:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(64, len(answering))) as ex:
-                results = list(ex.map(lambda h: (h, netbios_status(h["ip"], 0.8)), answering))
+        # Ask every remote address, not only the ones that answered: a Windows PC that blocks pings
+        # usually still answers NetBIOS (that is how Advanced IP Scanner / Angry IP find them too).
+        asked = sorted(remote, key=lambda h: (not h["alive"], h["n"]))[:4096]
+        n_alive = sum(1 for h in asked if h["alive"])
+        self.log.push({"type": "phase", "text": f"Asking {len(asked)} address(es) on other networks for names and hardware addresses (NetBIOS)…"})
+        nb_found = nb_new = 0
+        if asked:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(128, len(asked))) as ex:
+                results = list(ex.map(lambda h: (h, None if self._cancel.is_set() else netbios_status(h["ip"], 0.8)), asked))
             with self.lock:
                 for h, r in results:
                     if not r:
@@ -1822,6 +1825,12 @@ class Scanner:
                     if r.get("mac"):
                         h["mac"], h["vendor"], h["macSource"] = r["mac"], self.vendors.lookup(r["mac"]), "netbios"
                         nb_found += 1
+                    if not h["alive"]:
+                        h["alive"], h["status"] = True, "netbios"
+                        self.alive += 1
+                        nb_new += 1
+        self.mac_sources["netbiosAsked"] = n_alive
+        self.mac_sources["netbiosNew"] = nb_new
         self.mac_sources["netbios"] = nb_found
         with self.lock:
             still = [h for h in remote if not h.get("mac")]
