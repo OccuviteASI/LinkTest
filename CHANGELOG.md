@@ -3,6 +3,19 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.11.1 - 2026-10-09
+
+- Scan network: NetBIOS is now asked for every address still without a MAC,
+  wherever it is. 0.11.0 skipped addresses it believed were on this PC's own
+  network (from the adapter's subnet mask), which went wrong when a VPN or a
+  wide mask covered the scanned range.
+- Each device says why it has no MAC: "no MAC in its NetBIOS reply" (Samba,
+  NAS boxes and Linux report 00:00:00:00:00:00) or "no NetBIOS reply" (not
+  running it, or blocked between networks). Names are labelled "NetBIOS name"
+  or "DNS name", so a name no longer suggests the device answered NetBIOS.
+  The note after the scan counts each outcome and suggests checking one
+  address with `nbtstat -A`. The CSV mac_source column carries the reason.
+
 ## 0.11.0 - 2026-10-08
 
 - Scan network: **hardware (MAC) addresses for devices on other networks.**

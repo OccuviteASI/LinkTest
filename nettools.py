@@ -1733,7 +1733,7 @@ class Scanner:
     @staticmethod
     def _detail(host: dict) -> dict:
         return {"ip": host["ip"], "alive": host["alive"], "status": host["status"], "ports": host["ports"],
-                "hostname": host.get("hostname"), "interceptedPorts": host.get("interceptedPorts") or [],
+                "hostname": host.get("hostname"), "nameSource": host.get("nameSource"), "interceptedPorts": host.get("interceptedPorts") or [],
                 "phantom": bool(host.get("phantom")), "refused": bool(host.get("refused"))}
 
     def _manage(self, targets: list[str]):
@@ -1781,8 +1781,9 @@ class Scanner:
             self.finished_at = time.time()
             elapsed = self.finished_at - (self.started_at or self.finished_at)
             macs = {ip: {"mac": h["mac"], "vendor": h.get("vendor"), "macSource": h.get("macSource"), "hostname": h.get("hostname"),
-                         "netbios": h.get("netbios"), "status": h.get("status"), "alive": h.get("alive")}
-                    for ip, h in self.hosts.items() if h.get("mac") or h.get("netbios")}
+                         "netbios": h.get("netbios"), "status": h.get("status"), "alive": h.get("alive"), "nb": h.get("nb"),
+                         "nameSource": h.get("nameSource")}
+                    for ip, h in self.hosts.items() if h.get("mac") or h.get("nb")}
             dups = self._dup_macs()
         self.log.push({"type": "arp", "hosts": macs, "dupMacs": dups, "macSources": self.mac_sources})
         self.log.push({"type": "done", "cancelled": self._cancel.is_set(), "elapsed": round(elapsed, 1),
@@ -1795,15 +1796,10 @@ class Scanner:
         2. SNMP ARP tables of the routers (named ones, this computer's gateways, .1/.254 of the
            remote /24s): fills the rest, and finds devices that ignored pings but talked recently.
         """
+        # Every address still without a MAC is asked, wherever it is: deciding "remote" from this
+        # computer's subnet masks went wrong when a VPN or a wide mask covered the scanned range.
         with self.lock:
-            local_nets = []
-            for i in self.netinfo.interfaces():
-                try:
-                    local_nets.append(ipaddress.ip_network(f"{i['ip']}/{i.get('prefix') or 24}", strict=False))
-                except (ValueError, KeyError):
-                    pass
-            remote = [h for h in self.hosts.values() if not h.get("mac") and
-                      not any(ipaddress.ip_address(h["ip"]) in n for n in local_nets)]
+            remote = [h for h in self.hosts.values() if not h.get("mac")]
         if not remote:
             return
         # Ask every remote address, not only the ones that answered: a Windows PC that blocks pings
@@ -1818,10 +1814,13 @@ class Scanner:
             with self.lock:
                 for h, r in results:
                     if not r:
+                        h["nb"] = "none"
                         continue
+                    h["nb"] = "mac" if r.get("mac") else "nomac"
                     h["netbios"] = {"name": r.get("name"), "workgroup": r.get("workgroup")}
                     if r.get("name") and not h.get("hostname"):
                         h["hostname"] = r["name"]
+                        h["nameSource"] = "netbios"
                     if r.get("mac"):
                         h["mac"], h["vendor"], h["macSource"] = r["mac"], self.vendors.lookup(r["mac"]), "netbios"
                         nb_found += 1
@@ -1830,6 +1829,12 @@ class Scanner:
                         self.alive += 1
                         nb_new += 1
         self.mac_sources["netbiosAsked"] = n_alive
+        with self.lock:
+            al = [h for h in asked if h["alive"]]
+            self.mac_sources["nbMac"] = sum(1 for h in al if h.get("nb") == "mac")
+            self.mac_sources["nbNoMac"] = sum(1 for h in al if h.get("nb") == "nomac")
+            self.mac_sources["nbNone"] = sum(1 for h in al if h.get("nb") == "none")
+            self.mac_sources["dnsNamed"] = sum(1 for h in al if h.get("nb") == "none" and h.get("hostname"))
         self.mac_sources["netbiosNew"] = nb_new
         self.mac_sources["netbios"] = nb_found
         with self.lock:
@@ -1902,6 +1907,8 @@ class Scanner:
             self._evaluate(host)
         if host["alive"] and o["resolveNames"] and not self._cancel.is_set():
             host["hostname"] = self.dns.ptr(ip)
+            if host["hostname"]:
+                host["nameSource"] = "dns"
         with self.lock:
             self.done += 1
         self.log.push({"type": "detail", **self._detail(host)})
@@ -1921,7 +1928,8 @@ class Scanner:
                    ("port(s) " + " ".join(map(str, inter)) + " intercepted by the network") if inter else \
                    ("no ping reply but refused a connection" if h.get("status") == "refused" else "")
             src = h.get("macSource") or ""
-            src = "NetBIOS (device)" if src == "netbios" else f"SNMP router {src[5:]}" if src.startswith("snmp:") else "ARP" if src == "arp" else ""
+            src = "NetBIOS (device)" if src == "netbios" else f"SNMP router {src[5:]}" if src.startswith("snmp:") else "ARP" if src == "arp" else \
+                ("answered NetBIOS without a MAC" if h.get("nb") == "nomac" else "no NetBIOS reply" if h.get("nb") == "none" and h["alive"] else "")
             w.writerow([h["ip"], "yes" if h["alive"] else "no", h.get("hostname") or "", h.get("mac") or "",
                         h.get("vendor") or "", src, h["rtt"] if h["rtt"] is not None else "", h["status"],
                         " ".join(str(p) for p in h["ports"]), note])
