@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.13.2"
+VERSION = "0.13.3"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -87,6 +87,46 @@ def build_info() -> dict:
                     "source": here, "python": sys.executable, "frozen": False}
         _BUILD_INFO = info
     return _BUILD_INFO
+
+
+def read_clipboard() -> str:
+    """Text on the system clipboard, for the right-click Paste in text fields (the web view's own
+    menu is off outside debug mode, and a page cannot read the clipboard without a prompt)."""
+    if IS_WIN:
+        import ctypes
+        from ctypes import wintypes
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        u32.GetClipboardData.restype = wintypes.HANDLE
+        k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        k32.GlobalLock.restype = wintypes.LPVOID
+        k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        for _ in range(10):               # another program may hold it for a moment
+            if u32.OpenClipboard(None):
+                break
+            time.sleep(0.03)
+        else:
+            return ""
+        try:
+            h = u32.GetClipboardData(13)  # CF_UNICODETEXT
+            if not h:
+                return ""
+            ptr = k32.GlobalLock(h)
+            try:
+                return ctypes.wstring_at(ptr) if ptr else ""
+            finally:
+                k32.GlobalUnlock(h)
+        finally:
+            u32.CloseClipboard()
+    cmds = [["pbpaste"]] if IS_MAC else [["wl-paste", "--no-newline"], ["xclip", "-o", "-selection", "clipboard"],
+                                         ["xsel", "-ob"]]
+    for cmd in cmds:
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0:
+            return r.stdout.decode("utf-8", errors="replace")
+    return ""
 
 
 def clean_env() -> dict:
@@ -812,6 +852,14 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/update/check":
                 info = app.check_update(force=True)
                 return self._json({**self._update_status(), "error": info.get("error")})
+            if p == "/api/clipboard":
+                # Only LinkTest's own page: the custom header forces a CORS preflight from any other
+                # site, and the Host check stops DNS rebinding.
+                host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+                if (not self._same_origin() or self.headers.get("X-LinkTest") != "1"
+                        or host not in ("127.0.0.1", "localhost")):
+                    return self._json({"error": "Refused."}, 403)
+                return self._json({"text": read_clipboard()[:100_000]})
             if p == "/api/update/prompted":
                 app.update_prompted = True
                 return self._json({"ok": True})

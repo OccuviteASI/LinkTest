@@ -740,7 +740,6 @@ function wire() {
     el.addEventListener('input', () => { clearPreset(); schedulePreview(); });
     el.addEventListener('change', schedulePreview);
   });
-  $('#host').addEventListener('keydown', e => { if (e.key === 'Enter' && !S.running) startTest(); });
   $('#btnStart').onclick = () => S.running ? stopTest() : startTest();
   $('#btnAgain').onclick = () => { if (!S.running) startTest(); };
   $('#btnCopyCmd').onclick = () => copyText($('#cmdLine').textContent, 'Command copied');

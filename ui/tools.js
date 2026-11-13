@@ -1371,7 +1371,118 @@ function wireCapture() {
   wireZeek();
   $('#verPill').onclick = () => { showNotes(); updCheckNow(); };
   wireUpdates();
+  wireEnterKeys();
+  wireContextMenu();
   $('#notesClose').onclick = () => $('#notesDialog').close();
+}
+
+/* ------------------------------------------------------------------------ */
+/* Enter in a field presses its button; right-click menu for text fields    */
+/* ------------------------------------------------------------------------ */
+// field selectors -> [button, may it run now?]. One place, so every field behaves the same.
+const ENTER_MAP = [
+  ['#host,#duration,#parallel,#bitrate,#port,#omit,#interval,#bytes,#blocks,#window,#length,#mss,#bind,#cport,#dscp,#tos,#connectTimeout,#congestion,#title,#extraArgs,#sport,#sinterval,#sbind,#idleTimeout,#serverBitrateLimit,#sextraArgs',
+    '#btnStart', () => !S.running],                       // never turns into "Stop test"
+  ['#iperfPathInput', '#btnUsePath'],
+  ['#scanRange,#scanPorts,#scanTimeout,#scanRetries,#scanSnmpComm,#scanSnmpRouters', '#scanStart', () => !SC.running],
+  ['#arpQ', '#arpGo'],
+  ['#arpDelIp', '[data-cmd="delete"]'],
+  ['#arpAddIp,#arpAddMac', '[data-cmd="add"]'],
+  ['#pingHost,#pingPort,#pingLabel', '#pingAdd'],
+  ['#dnsName', '#dnsGo'],
+  ['#dnsCustom', '#dnsAddServer'],
+  ['#pcName,#pcHost,#pcPort', '#pcStart'],
+];
+
+function wireEnterKeys() {
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.altKey) return;
+    const f = e.target;
+    if (!(f instanceof HTMLInputElement)) return;
+    for (const [fields, btnSel, ok] of ENTER_MAP) {
+      if (!f.matches(fields)) continue;
+      const btn = $(btnSel);
+      e.preventDefault();
+      if (btn && !btn.disabled && btn.offsetParent !== null && (!ok || ok())) btn.click();
+      return;
+    }
+  });
+}
+
+const CTX = { el: null, field: null };
+
+function ctxClose() { if (CTX.el) CTX.el.classList.add('hidden'); CTX.field = null; }
+
+function ctxEditable(t) {
+  if (t instanceof HTMLTextAreaElement) return !t.disabled;
+  return t instanceof HTMLInputElement && !t.disabled &&
+    ['text', 'search', 'number', 'url', 'email', 'tel', 'password', ''].includes(t.type);
+}
+
+async function ctxPaste(f) {
+  let text = '';
+  try {
+    const r = await fetch('/api/clipboard', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-LinkTest': '1' }, body: '{}' });
+    text = (await r.json()).text || '';
+  } catch (e) { /* ignore */ }
+  if (!text && navigator.clipboard && navigator.clipboard.readText) {
+    try { text = await navigator.clipboard.readText(); } catch (e) { /* ignore */ }
+  }
+  if (!text) { toast('There is no text on the clipboard.'); return; }
+  f.focus();
+  if (f.type === 'number') f.value = text.trim();
+  else {
+    if (f instanceof HTMLInputElement) text = text.replace(/\r?\n/g, ' ').trim();
+    const a = f.selectionStart ?? f.value.length, b = f.selectionEnd ?? a;
+    f.setRangeText(text, a, b, 'end');
+  }
+  f.dispatchEvent(new Event('input', { bubbles: true }));
+  f.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function wireContextMenu() {
+  const m = document.createElement('div');
+  m.className = 'ctx-menu hidden'; m.setAttribute('role', 'menu');
+  m.innerHTML = ['cut:Cut', 'copy:Copy', 'paste:Paste', 'all:Select all']
+    .map(x => { const [a, t] = x.split(':'); return `<button type="button" role="menuitem" data-a="${a}">${t}</button>`; }).join('');
+  document.body.appendChild(m); CTX.el = m;
+  document.addEventListener('contextmenu', e => {
+    const t = e.target, editable = ctxEditable(t);
+    const sel = editable ? (t.type !== 'number' && t.selectionEnd > t.selectionStart) : String(window.getSelection() || '').length > 0;
+    if (!editable && !sel) { ctxClose(); return; }   // nothing useful to offer
+    e.preventDefault();
+    CTX.field = editable ? t : null;
+    const ro = editable && t.readOnly;
+    m.querySelector('[data-a="cut"]').classList.toggle('hidden', !editable);
+    m.querySelector('[data-a="paste"]').classList.toggle('hidden', !editable);
+    m.querySelector('[data-a="all"]').classList.toggle('hidden', !editable);
+    m.querySelector('[data-a="cut"]').disabled = !sel || ro;
+    m.querySelector('[data-a="copy"]').disabled = !sel;
+    m.querySelector('[data-a="paste"]').disabled = ro;
+    m.classList.remove('hidden');
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.min(e.clientX, innerWidth - r.width - 4) + 'px';
+    m.style.top = Math.min(e.clientY, innerHeight - r.height - 4) + 'px';
+    // a menu opened inside a modal dialog must live in it to be clickable above the backdrop
+    const dlg = t.closest && t.closest('dialog[open]');
+    (dlg || document.body).appendChild(m);
+  });
+  m.addEventListener('mousedown', e => e.preventDefault());   // keep the field's focus and selection
+  m.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-a]'); if (!b || b.disabled) return;
+    const f = CTX.field, a = b.dataset.a;
+    ctxClose();
+    if (a === 'copy' || a === 'cut') {
+      if (f) f.focus();
+      try { document.execCommand(a); } catch (err) { /* ignore */ }
+      if (f && a === 'cut') f.dispatchEvent(new Event('input', { bubbles: true }));
+    } else if (a === 'paste' && f) await ctxPaste(f);
+    else if (a === 'all' && f) { f.focus(); f.select(); }
+  });
+  document.addEventListener('mousedown', e => { if (!m.contains(e.target)) ctxClose(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') ctxClose(); });
+  window.addEventListener('blur', ctxClose);
+  window.addEventListener('scroll', ctxClose, true);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1873,7 +1984,6 @@ function wireTools() {
   document.addEventListener('click', ensureAudio, { once: true });
   // scan
   $('#scanStart').onclick = () => SC.running ? scanStop() : scanStart();
-  $('#scanRange').addEventListener('keydown', e => { if (e.key === 'Enter' && !SC.running) scanStart(); });
   $$('#portPresets button').forEach(b => b.onclick = () => scanApplyPreset(b.dataset.p));
   $('#scanPorts').addEventListener('input', scanPresetReflect);
   $('#scanRange').addEventListener('input', scanSettingsSum);
@@ -1898,7 +2008,6 @@ function wireTools() {
   ['arpDelIp', 'arpAddIp', 'arpAddMac'].forEach(id => $('#' + id).addEventListener('input', arpRenderCmds));
   $('#arpOutCopy').onclick = () => copyText($('#arpOut').textContent, 'Output copied');
   $('#arpQ').addEventListener('input', () => { if (!$('#arpDelIp').value) { const v = $('#arpQ').value.trim(); if (/^\d+\.\d+\.\d+\.\d+$/.test(v)) { $('#arpDelIp').placeholder = v; } } });
-  $('#arpQ').addEventListener('keydown', e => { if (e.key === 'Enter') arpLookup(); });
   $('#arpCsv').onclick = () => {
     const rows = AR.rows; if (!rows.length) { toast('Nothing to save yet'); return; }
     const csv = 'ip,mac,vendor,mac_type,entry,connection,hostname,in_last_scan\n' + rows.map(r => [r.ip, r.mac, r.vendor || '', r.macKind, r.kind, r.iface || '', r.hostname || '', r.inScan ? 'yes' : 'no'].map(v => `"${String(v).replace(/"/g, "'")}"`).join(',')).join('\n') + '\n';
@@ -1906,12 +2015,9 @@ function wireTools() {
   };
   // pings
   $('#pingAdd').onclick = pmAdd;
-  $('#pingHost').addEventListener('keydown', e => { if (e.key === 'Enter') pmAdd(); });
   $('#pingHost').addEventListener('input', pmKindUI);
   $('#pingKind').onchange = pmKindUI;
-  $('#pingPort').addEventListener('keydown', e => { if (e.key === 'Enter') pmAdd(); });
   $('#pingInterval').onchange = () => { $('#pingInterval').dataset.userSet = '1'; };
-  $('#pingLabel').addEventListener('keydown', e => { if (e.key === 'Enter') pmAdd(); });
   $('#pingCollapseAll').onclick = () => pmCollapseAll(true);
   $('#pingExpandAll').onclick = () => pmCollapseAll(false);
   pmWireDragTarget();
@@ -1919,14 +2025,12 @@ function wireTools() {
   wireWifi();
   // dns
   $('#dnsGo').onclick = dnsLookup;
-  $('#dnsName').addEventListener('keydown', e => { if (e.key === 'Enter') dnsLookup(); });
   $('#dnsAddServer').onclick = () => {
     const v = $('#dnsCustom').value.trim(); if (!v) return;
     if (!/^[0-9a-fA-F.:]+$/.test(v)) { toast('Enter the server as an IP address, e.g. 10.0.0.1'); return; }
     if (!DN.custom.includes(v) && !DN.presets.some(p => p.ip === v)) DN.custom.push(v);
     DN.selected.add(v); $('#dnsCustom').value = ''; dnsRenderChips();
   };
-  $('#dnsCustom').addEventListener('keydown', e => { if (e.key === 'Enter') $('#dnsAddServer').click(); });
   window.addEventListener('resize', () => { if (T.tab === 'pings') PM.order.forEach(id => PM.t[id] && PM.t[id].el && !PM.t[id].stats.collapsed && pmUpdate(id, true)); });
 }
 

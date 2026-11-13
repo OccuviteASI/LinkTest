@@ -125,6 +125,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `/api/scan/events?since`, `/api/scan/state`, `/api/scan/csv` | GET | Scanner stream (`start`, `host`, `detail`, `progress`, `intercept {ports, phase}`, `arp`, `done`) / rehydrate (includes `intercepted`) / export |
 | `/api/update/status` | GET | Build (version, commit, branch, frozen), whether it can update and why not, last check result, tray state and options |
 | `/api/update/check` | POST | Run `updater.py --check` now; returns the same as status |
+| `/api/clipboard` | POST | System clipboard text for the right-click Paste (Windows clipboard API, pbpaste, wl-paste / xclip / xsel). Only with `X-LinkTest: 1`, a same-origin or missing Origin and Host 127.0.0.1 / localhost |
 | `/api/update/prompted` | POST | The launch prompt was answered; status stops returning `prompt: true` until the next launch |
 | `/api/update/start` | POST | Start the update (progress window; the app is closed and restarted by it). Same-origin only |
 | `/api/quit` | POST | Quit LinkTest (all windows; used by Settings and the updater). Same-origin only |

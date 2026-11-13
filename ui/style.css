@@ -47,6 +47,12 @@ pre { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border
 .pill-good { background: var(--good-soft); color: var(--good); }
 .pill-bad { background: var(--bad-soft); color: var(--bad); }
 .icon-btn { border: 1px solid var(--line); background: var(--card); color: var(--muted); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-weight: 700; }
+.ctx-menu { position: fixed; z-index: 1000; min-width: 150px; padding: 4px; border-radius: 8px; background: var(--card);
+  border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0,0,0,.18); display: flex; flex-direction: column; }
+.ctx-menu button { all: unset; padding: 6px 12px; border-radius: 5px; font-size: 13.5px; color: var(--text); cursor: default; }
+.ctx-menu button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.ctx-menu button:disabled { color: var(--soft); }
+.ctx-menu button.hidden { display: none; }
 .icon-btn.icon-cog { display: inline-grid; place-items: center; padding: 0; }
 dialog h3.first { margin-top: 4px; }
 .icon-btn:hover { color: var(--text); border-color: var(--soft); }

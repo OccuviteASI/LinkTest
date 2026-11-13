@@ -3,6 +3,19 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.13.3 - 2026-11-13
+
+- **Right-click in a text field** now offers Cut, Copy, Paste and Select all
+  (and Copy on any selected text). The native window turns its built-in menu
+  off outside debug mode, so there was no way to paste with the mouse. Paste
+  reads the system clipboard through LinkTest (no browser permission prompt);
+  only LinkTest's own page can ask for it.
+- **Enter in a field presses its button** everywhere: speed test (every
+  option field → Start, never Stop), scan (range, ports, timeouts, SNMP →
+  Scan), IP lookup, ARP delete / add, ping monitor → Watch, DNS name → Look
+  up, DNS server → Add, packet capture name / filters → Start recording,
+  iperf3 path → Use this file. Before, only a few fields did.
+
 ## 0.13.2 - 2026-11-13
 
 - **Settings** button (a cog, next to "?" at the top right): the Updates and
