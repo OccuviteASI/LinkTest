@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,11 @@ def check_python_deps() -> None:
         import webview  # noqa: F401
     except ImportError:
         sys.exit("build: pywebview is not installed in this Python -- pip install -r requirements.txt")
+    if not MAC:
+        import importlib.util
+        # find_spec, not import: pystray connects to the display when imported on Linux
+        if not all(importlib.util.find_spec(m) for m in ("pystray", "PIL")):
+            print("WARNING: pystray / Pillow missing -- this build will have no tray icon. pip install -r requirements.txt")
     if LINUX:
         try:
             import PySide6.QtWebEngineWidgets  # noqa: F401
@@ -87,6 +93,29 @@ def check_python_deps() -> None:
             print("WARNING: pyobjc-framework-CoreWLAN is missing -- the Wi-Fi tab will fall back to system_profiler (slow, no BSSIDs)")
 
 
+def git_info() -> dict:
+    """Commit and branch of this source folder (empty when it is not a git checkout)."""
+    def run(*args):
+        try:
+            r = subprocess.run(["git", *args], cwd=HERE, capture_output=True, text=True, timeout=30)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return {"commit": run("rev-parse", "HEAD"), "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
+
+
+def write_build_info(ver: str) -> str:
+    """build_info.json, bundled into the executable: which commit it is and where its source and
+    build Python live, so "Update LinkTest" can pull, rebuild and replace it (updater.py)."""
+    info = {"version": ver, **git_info(), "source": HERE, "python": sys.executable, "tag": TAG,
+            "built": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    path = os.path.join(WORK, "build_info.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=2)
+    return path
+
+
 def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[str]:
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--onedir" if onedir else "--onefile",
@@ -94,7 +123,9 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
            "--paths", HERE,
            "--add-data", os.path.join(HERE, "ui") + SEP + "ui",
            "--add-data", os.path.join(HERE, "CHANGELOG.md") + SEP + ".",
+           "--add-data", os.path.join(WORK, "build_info.json") + SEP + ".",
            "--hidden-import", "pcaplogs", "--hidden-import", "pcapproto", "--hidden-import", "zeek_tables",
+           "--hidden-import", "tray", "--hidden-import", "PIL.Image", "--hidden-import", "PIL.ImageDraw",
            "--exclude-module", "tkinter", "--exclude-module", "unittest",
            "--exclude-module", "webview.platforms.cef", "--exclude-module", "webview.platforms.android",
            "--exclude-module", "webview.platforms.mshtml"]
@@ -114,6 +145,7 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
             cmd += ["--icon", ico, "--add-data", ico + SEP + "assets"]
         if not console:
             cmd.append("--noconsole")
+        cmd += ["--hidden-import", "pystray._win32"]
         cmd += ["--hidden-import", "webview.platforms.winforms", "--hidden-import", "webview.platforms.edgechromium",
                 "--hidden-import", "webview.platforms.win32", "--hidden-import", "clr",
                 "--exclude-module", "webview.platforms.qt", "--exclude-module", "webview.platforms.gtk"]
@@ -142,7 +174,8 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
                 "--hidden-import", "PySide6.QtWebChannel", "--hidden-import", "PySide6.QtNetwork",
                 "--hidden-import", "PySide6.QtPrintSupport",
                 "--exclude-module", "webview.platforms.gtk", "--exclude-module", "webview.platforms.winforms",
-                "--exclude-module", "webview.platforms.edgechromium"]
+                "--exclude-module", "webview.platforms.edgechromium",
+                "--hidden-import", "pystray._xorg"]
     cmd.append(os.path.join(HERE, "linktest.py"))
     return cmd
 
@@ -150,9 +183,11 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
 def build_here(console: bool, onedir: bool) -> int:
     ver = version()
     check_python_deps()
+    print(f"Build Python: {sys.executable}")
     binaries = check_binaries()
     os.makedirs(DIST, exist_ok=True)
     os.makedirs(WORK, exist_ok=True)
+    info_path = write_build_info(ver)
     out = os.path.join(DIST, NAME + (".exe" if WINDOWS else ""))
     if onedir:
         out = os.path.join(DIST, NAME, NAME + (".exe" if WINDOWS else ""))
@@ -176,6 +211,8 @@ def build_here(console: bool, onedir: bool) -> int:
         finish_mac_bundle(app_bundle, ver)
     with open(os.path.join(DIST, "VERSION.txt"), "w", encoding="utf-8") as f:
         f.write(ver + "\n")
+    shutil.copyfile(info_path, os.path.join(DIST, "build.json"))   # what updater.py compares with
+    write_update_launcher()
     with open(os.path.join(HERE, "bin", TAG, "LICENSE.txt"), encoding="utf-8") as src, \
             open(os.path.join(DIST, "THIRD-PARTY-LICENSES.txt"), "w", encoding="utf-8") as dst:
         dst.write(src.read())
@@ -193,6 +230,20 @@ def build_here(console: bool, onedir: bool) -> int:
         if subprocess.call(["ditto", "-c", "-k", "--keepParent", app_bundle, zip_path]) == 0:
             print(f"App bundle: {app_bundle}\nZip for sharing: {zip_path}")
     return 0
+
+
+def write_update_launcher() -> None:
+    """'Update LinkTest' next to the executable: the same update as the tray menu, in a console."""
+    if WINDOWS:
+        with open(os.path.join(DIST, "Update LinkTest.cmd"), "w", encoding="utf-8", newline="\r\n") as f:
+            f.write("@echo off\nrem Pulls the latest LinkTest, rebuilds it and restarts it.\n"
+                    f'"{sys.executable}" "{os.path.join(HERE, "updater.py")}" %*\npause\n')
+    else:
+        path = os.path.join(DIST, "update-linktest.sh")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("#!/usr/bin/env sh\n# Pulls the latest LinkTest, rebuilds it and restarts it.\n"
+                    f'exec "{sys.executable}" "{os.path.join(HERE, "updater.py")}" "$@"\n')
+        os.chmod(path, 0o755)
 
 
 def finish_mac_bundle(app: str, ver: str) -> None:

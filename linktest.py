@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -31,13 +32,16 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.11.2"
+VERSION = "0.12.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
 WINDOW_SIZE = (1160, 940)
 WINDOW_MIN = (820, 600)
 HEARTBEAT_GRACE = 90  # browser mode only: seconds without a heartbeat before closing
+UPDATE_CHECK_EVERY = 12 * 3600
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_BUILD_INFO: dict | None = None
 
 
 def resource_dir() -> str:
@@ -56,6 +60,48 @@ def state_dir() -> str:
                          APP_NAME.lower())
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _git(cwd: str, *args: str) -> str:
+    try:
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=15,
+                           creationflags=NO_WINDOW)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def build_info() -> dict:
+    """Which commit this LinkTest is and where its source and build Python are (for updates).
+
+    A built executable carries build_info.json (written by build.py); from source it is read from git."""
+    global _BUILD_INFO
+    if _BUILD_INFO is None:
+        if getattr(sys, "frozen", False):
+            info = read_json(os.path.join(resource_dir(), "build_info.json"), {})
+            info = info if isinstance(info, dict) else {}
+            info["frozen"] = True
+        else:
+            here = os.path.dirname(os.path.abspath(__file__))
+            info = {"commit": _git(here, "rev-parse", "HEAD"), "branch": _git(here, "rev-parse", "--abbrev-ref", "HEAD"),
+                    "source": here, "python": sys.executable, "frozen": False}
+        _BUILD_INFO = info
+    return _BUILD_INFO
+
+
+def clean_env() -> dict:
+    """os.environ without what the PyInstaller bootloader added, for programs we start.
+
+    A frozen LinkTest's _PYI_* variables and LD_LIBRARY_PATH point at its own unpack folder,
+    which is deleted when it exits; another LinkTest started with them refuses to run."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+    for var in ("LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+        orig = env.pop(var + "_ORIG", None)
+        if orig is not None:
+            env[var] = orig
+        elif getattr(sys, "frozen", False):
+            env.pop(var, None)
+    return env
 
 
 def downloads_dir() -> str:
@@ -95,6 +141,12 @@ class App:
         self.runner.on_result = self._on_result
         self.windowed = windowed
         self.windows: list = []          # live pywebview windows
+        self.hidden: list = []           # windows hidden to the tray
+        self.tray = None
+        self._quitting = False
+        self.update_info: dict | None = None
+        self.update_prompted = False     # the launch prompt was answered (once per launch, all windows)
+        self._update_lock = threading.Lock()
         self.url = ""
         self.last_heartbeat = None
         self.server: ThreadingHTTPServer | None = None
@@ -178,12 +230,181 @@ class App:
             self.windows.remove(win)
         except ValueError:
             pass
+        if win in self.hidden:
+            self.hidden.remove(win)
+        # The last visible window was closed while others sit in the tray: closing means quit
+        # unless "keep running in the tray" is on.
+        if (self.windows and not self._quitting and all(w in self.hidden for w in self.windows)
+                and not (self.tray_ok() and self.settings.get("trayClose"))):
+            threading.Thread(target=self.quit, daemon=True).start()
 
     def request_new_window(self) -> bool:
         if not self.windowed or not self.url:
             return False
+        if self.hidden:   # started again while in the tray: bring the window back
+            self.show_windows()
+            return True
         open_native_window(self, self.url)
         return True
+
+    # -- tray ------------------------------------------------------------------
+    def tray_ok(self) -> bool:
+        return bool(self.tray and self.tray.ok)
+
+    def start_tray(self) -> None:
+        try:
+            import tray as tr
+        except Exception:
+            return
+        png = os.path.join(resource_dir(), "assets", "linktest.ico" if IS_WIN else "linktest.png")
+        t = tr.Tray(png if os.path.isfile(png) else None, self.show_windows, self.start_update, self.quit,
+                    self.tray_update_label)
+        self.tray = t
+        if t.start():
+            t.set_title(f"{APP_NAME} {VERSION}")
+        elif self.hidden:
+            self.show_windows()
+
+    def tray_update_label(self) -> str | None:
+        if self.updater()[0] is None:
+            return None
+        info = self.update_info or {}
+        if info.get("available"):
+            return f"Update LinkTest ({info.get('latestVersion') or 'new version'} available)"
+        return "Update LinkTest"
+
+    def hide_window(self, win) -> None:
+        try:
+            win.hide()
+        except Exception:
+            return
+        if win not in self.hidden:
+            self.hidden.append(win)
+        if not self.settings.get("trayHintShown") and self.tray:
+            self.tray.notify("LinkTest is still running here. Click the icon to open it again"
+                             + ("; right-click for Update and Quit." if self.tray.has_menu else "."))
+            self.settings["trayHintShown"] = True
+            self.save_settings()
+
+    def show_windows(self) -> None:
+        if not self.windowed:
+            webbrowser.open(self.url)
+            return
+        wins = list(self.hidden) or self.windows[-1:]
+        self.hidden = []
+        if not wins and self.url:
+            open_native_window(self, self.url)
+            return
+        for w in wins:
+            try:
+                w.show()
+                w.restore()
+            except Exception:
+                pass
+
+    def on_minimized(self, win) -> None:
+        if self.tray_ok() and self.settings.get("trayMinimize", True):
+            self.hide_window(win)
+
+    def on_closing(self, win):
+        """Close to the tray (if chosen) when this is the last visible window."""
+        if self._quitting or not self.tray_ok() or not self.settings.get("trayClose"):
+            return None
+        visible = [w for w in self.windows if w not in self.hidden]
+        if visible != [win]:
+            return None
+        threading.Thread(target=self.hide_window, args=(win,), daemon=True).start()
+        return False
+
+    def quit(self) -> None:
+        """Quit for real (tray menu, About, the updater)."""
+        self._quitting = True
+        if self.windowed and self.windows:
+            for w in list(self.windows):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            threading.Timer(15.0, lambda: os._exit(0)).start()   # never hang an update on a stuck window
+        else:
+            self.shutdown()
+
+    # -- updates -----------------------------------------------------------------
+    def updater(self) -> tuple[str | None, str]:
+        """(build Python, source folder) that can update this LinkTest, or (None, why not)."""
+        b = build_info()
+        src, py = b.get("source") or "", b.get("python") or ""
+        if not src or not os.path.isfile(os.path.join(src, "updater.py")):
+            return None, ("This copy of LinkTest was not built with the updater. Build it once from the "
+                          "source folder (python build.py); after that it can update itself.")
+        if not os.path.isdir(os.path.join(src, ".git")):
+            return None, f"The source folder {src} is not a git checkout, so there is nothing to pull."
+        if not py or not os.path.isfile(py):
+            return None, (f"The Python that built LinkTest ({py or 'unknown'}) is no longer there. "
+                          "Build once with python build.py to refresh it.")
+        return py, src
+
+    def check_update(self, force: bool = False) -> dict:
+        py, src = self.updater()
+        if py is None:
+            return {"error": src}
+        with self._update_lock:
+            info = self.update_info
+            if info and not force and time.time() - info.get("checkedAt", 0) < 600:
+                return info
+            cmd = [py, os.path.join(src, "updater.py"), "--check", "--json"]
+            if build_info().get("commit"):
+                cmd += ["--have", build_info()["commit"]]
+            try:
+                r = subprocess.run(cmd, cwd=src, env=clean_env(), capture_output=True, text=True, timeout=120,
+                                   creationflags=NO_WINDOW)
+                lines = [ln for ln in (r.stdout or "").splitlines() if ln.startswith("{")]
+                info = json.loads(lines[-1]) if lines else {"error": (r.stderr or r.stdout or "no answer").strip()[-400:]}
+            except subprocess.TimeoutExpired:
+                info = {"error": "Checking took too long (is GitHub reachable?)."}
+            except (OSError, ValueError) as e:
+                info = {"error": f"Could not run the update check: {e}"}
+            info["checkedAt"] = time.time()
+            self.update_info = info
+        if self.tray:
+            self.tray.refresh()
+        return info
+
+    def start_update(self) -> dict:
+        py, src = self.updater()
+        if py is None:
+            if self.tray:
+                self.tray.notify(src)
+            return {"error": src}
+        gui_py = py
+        if IS_WIN and os.path.basename(py).lower() == "python.exe":
+            alt = os.path.join(os.path.dirname(py), "pythonw.exe")
+            gui_py = alt if os.path.isfile(alt) else py
+        cmd = [gui_py, os.path.join(src, "update_gui.py"), "--pid", str(os.getpid())]
+        if self.server:
+            cmd += ["--port", str(self.server.server_address[1])]
+        if build_info().get("commit"):
+            cmd += ["--have", build_info()["commit"]]
+        cmd += ["--exe", sys.executable] if getattr(sys, "frozen", False) else ["--source"]
+        quiet = dict(cwd=src, env=clean_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
+        try:
+            if IS_WIN:
+                subprocess.Popen(cmd, creationflags=0x00000008 | 0x00000200, **quiet)  # detached, own group
+            else:
+                subprocess.Popen(cmd, start_new_session=True, **quiet)
+        except OSError as e:
+            return {"error": f"Could not start the updater: {e}"}
+        return {"ok": True}
+
+    def update_loop(self) -> None:
+        """Check GitHub right after launch (the UI then offers Update now / Skip for now) and twice
+        a day after that. About > Updates can turn it off."""
+        time.sleep(3)
+        while not self._shutting_down:
+            if self.settings.get("updateCheck", True) and self.updater()[0]:
+                self.check_update(force=True)
+            time.sleep(UPDATE_CHECK_EVERY)
 
     def _save_dialog(self, name: str) -> str | None:
         import webview  # available whenever windowed
@@ -319,6 +540,28 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _same_origin(self) -> bool:
+        """Browsers send Origin on cross-site POSTs; refuse those for update / quit."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        port = self.server.server_address[1]
+        return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
+    def _update_status(self) -> dict:
+        app = self.app
+        b = build_info()
+        py, why = app.updater()
+        return {"version": VERSION, "commit": (b.get("commit") or "")[:7], "branch": b.get("branch") or "",
+                "frozen": bool(b.get("frozen")), "built": b.get("built"), "source": b.get("source") or "",
+                "canUpdate": py is not None, "why": "" if py else why, "info": app.update_info,
+                "tray": app.tray_ok(), "trayMenu": bool(app.tray and app.tray.has_menu), "windowed": app.windowed,
+                "trayMinimize": app.settings.get("trayMinimize", True), "trayClose": bool(app.settings.get("trayClose")),
+                "updateCheck": app.settings.get("updateCheck", True),
+                # Ask once per launch, in one window, when the launch check found an update
+                "prompt": bool(py and not app.update_prompted and app.settings.get("updateCheck", True)
+                               and (app.update_info or {}).get("available") and not (app.update_info or {}).get("problem"))}
+
     def _status(self) -> dict:
         app = self.app
         return {
@@ -356,6 +599,8 @@ class Handler(BaseHTTPRequestHandler):
                                "running": app.runner.running()})
         if p == "/api/settings":
             return self._json({"settings": app.settings})
+        if p == "/api/update/status":
+            return self._json(self._update_status())
         if p == "/api/history":
             with app.lock:
                 hist = list(reversed(app.history))
@@ -557,6 +802,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "result": ir.add_firewall_rules(port)})
             if p == "/api/window":
                 return self._json({"ok": app.request_new_window()})
+            if p == "/api/update/check":
+                info = app.check_update(force=True)
+                return self._json({**self._update_status(), "error": info.get("error")})
+            if p == "/api/update/prompted":
+                app.update_prompted = True
+                return self._json({"ok": True})
+            if p in ("/api/update/start", "/api/quit"):
+                if not self._same_origin():
+                    return self._json({"error": "Refused: not from LinkTest itself."}, 403)
+                if p == "/api/quit":
+                    threading.Timer(0.3, app.quit).start()
+                    return self._json({"ok": True})
+                return self._json(app.start_update())
             if p == "/api/export":
                 name = str(body.get("name") or "").strip()
                 text = body.get("text")
@@ -808,6 +1066,8 @@ def open_native_window(app: App, url: str):
     win = webview.create_window(APP_NAME, url, min_size=WINDOW_MIN, text_select=True, zoomable=False,
                                 background_color="#f3f5f9", **kw)
     win.events.closed += lambda: app.on_window_closed(win)
+    win.events.closing += lambda: app.on_closing(win)      # runs first: may keep it in the tray
+    win.events.minimized += lambda: app.on_minimized(win)
     state = _wire_geometry_saving(app, win)
 
     def on_shown():
@@ -856,6 +1116,7 @@ def run_windowed(app: App, url: str, sd: str, verbose: bool) -> bool:
     webview.settings["ALLOW_DOWNLOADS"] = False        # exports go through /api/export
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     open_native_window(app, url)
+    threading.Thread(target=app.start_tray, name="tray-start", daemon=True).start()
     webview.start(gui=gui_backend(), private_mode=False, storage_path=webview_storage_dir(sd),
                   icon=icon_path(), debug=verbose)
     return True
@@ -926,7 +1187,11 @@ def main(argv=None) -> int:
     write_json(instance_file, {"port": port, "pid": os.getpid()})
     print(f"{APP_NAME} {VERSION} at {url}  (state: {sd})")
 
+    threading.Thread(target=app.update_loop, name="update-check", daemon=True).start()
+
     def cleanup():
+        if app.tray:
+            app.tray.stop()
         app.stop_tools()
         try:
             os.remove(instance_file)

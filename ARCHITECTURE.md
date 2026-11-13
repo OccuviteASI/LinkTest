@@ -34,7 +34,42 @@ tab is gone (never while a test/listener is running). `--no-open` just serves
 (used by the browser-pane dev server in `.claude/launch.json`).
 
 A second launch finds the running instance via `<state>/instance.json`, asks
-it to open another window (`POST /api/window`) and exits.
+it to open another window (`POST /api/window`; it shows the windows hidden in
+the tray instead, if any) and exits.
+
+Tray (`tray.py`, pystray on its own thread; win32 backend on Windows, X11 on
+Linux, none on macOS): `minimized` hides the window (`App.on_minimized`),
+`closing` is cancelled and the window hidden when "keep running in the tray"
+is on and it is the last visible one (`App.on_closing`); `App.quit()` destroys
+all windows so `webview.start()` returns. `Tray.ok` is True only when the icon
+really docked (an X11 tray owner exists), so a window is never hidden with no
+way back. pystray's X11 icon window does not select ButtonPress; `tray.py`
+adds it after docking.
+
+Update (`updater.py` + `update_gui.py`, run from the source folder with the
+build Python, outside the app because the update closes it):
+
+```
+App.start_update ──spawn──> update_gui.py (Tk progress) ──> updater.py
+                                     git fetch + ff-only ─> pip (if requirements changed)
+                                     POST /api/quit to the app, wait for its pid (kill after 20 s)
+                                     build.py ─> dist/<tag>/LinkTest[.exe] + build.json
+                                     copy over the exe that asked (--exe), start it
+```
+
+`build.py` writes `build_info.json` (commit, branch, source folder, build
+Python) into the bundle; `build_info()` reads it (or git when run from source)
+and `App.updater()` says whether an update is possible. `/api/update/check`
+runs `updater.py --check --json` (cached 10 min); `update_loop` checks 3 s
+after launch and every 12 h. Status carries `prompt: true` after a launch
+check found an update and no window has asked yet; the UI then shows the
+Update now / Skip for now dialog and posts `/api/update/prompted`. Programs
+the app starts get `clean_env()`: a frozen LinkTest's `_PYI_*` and
+`LD_LIBRARY_PATH` point at its own unpack folder, and a LinkTest started with
+them refuses to run ("Security validation failure"); `updater.py` strips
+them again and waits for the restarted app to answer `/api/ping`. `/api/update/start` and `/api/quit` refuse requests with a
+foreign `Origin`. Lock: `dist/update.lock`; log of the last update:
+`dist/update.log`.
 
 ## 2. Modules
 
@@ -53,6 +88,9 @@ it to open another window (`POST /api/window`) and exits.
 | `ui/tools.js` | Tabs, Scan, Ping monitor (route table + latency chart, collapsible cards), DNS compare. |
 | `ui/style.css` | Design tokens (light/dark via `prefers-color-scheme`), components. |
 | `fetch-helpers.py` | Downloads and SHA-256-pins bundled helpers into `bin/<tag>/` and `assets/` (iperf3 per platform, MAC vendor table). Never used at runtime. |
+| `tray.py` | System-tray icon (pystray): Open / Update / Quit menu, `ok` only when really docked; X11 click fix. |
+| `updater.py` | Update from GitHub: fetch + fast-forward the followed branch, pip when requirements changed, close the app (`/api/quit`), `build.py`, copy over the exe that asked, restart; `--check --json` for the app. |
+| `update_gui.py` | Tk progress window around `updater.py` (status line, bar, details log, run in background); silent fallback without Tk. |
 | `build.py` | PyInstaller one-file build for the current platform; `--wsl` runs the Linux build inside WSL; on macOS emits `LinkTest.app` + zip (`finish_mac_bundle` patches Info.plist and ad-hoc signs). `build-mac.sh` wraps venv + fetch + build; `MACOS.md` documents it. |
 | `tools/` | Dev aids: `fake_iperf3.py` (+ `make_fake.py`), `make_icon.py`. |
 
@@ -84,6 +122,11 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `/api/arp/lookup {q}` | POST | MAC → maker, type, IPs; IP/name → one ping, then MAC, maker, name, connection (`nettools.arp_lookup`) |
 | `/api/scan/start {range, ports, …}`, `/api/scan/stop` | POST | Scanner control |
 | `/api/scan/events?since`, `/api/scan/state`, `/api/scan/csv` | GET | Scanner stream (`start`, `host`, `detail`, `progress`, `intercept {ports, phase}`, `arp`, `done`) / rehydrate (includes `intercepted`) / export |
+| `/api/update/status` | GET | Build (version, commit, branch, frozen), whether it can update and why not, last check result, tray state and options |
+| `/api/update/check` | POST | Run `updater.py --check` now; returns the same as status |
+| `/api/update/prompted` | POST | The launch prompt was answered; status stops returning `prompt: true` until the next launch |
+| `/api/update/start` | POST | Start the update (progress window; the app is closed and restarted by it). Same-origin only |
+| `/api/quit` | POST | Quit LinkTest (all windows; used by About and the updater). Same-origin only |
 | `/api/pings/targets` | GET | Targets with stats, recent samples and per-hop recent samples (load/reload only) |
 | `/api/pings/samples?since` | GET | Events (`sample`, `hops`, `route`, `outage`, `recovery`, `removed`) + a stats snapshot per target (route rows without samples) |
 | `/api/pings/history?id&hours`, `/api/pings/csv?id&days` | GET | Backfill / export from day files |
@@ -112,7 +155,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 
 | Path | Content |
 |---|---|
-| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
+| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `trayMinimize` (default on), `trayClose` (default off), `trayHintShown`, `updateCheck` (default on). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
 | `history.json` | Speed-test results (≤ 300), each `{id, ts, label?, mode, opts, cmd, summary, intervals, iperfVersion, host}` |
 | `pings/<targetId>/<YYYY-MM-DD>.csv` | `ts,rtt_ms,status` per sample; written every 5 s; pruned after `pingRetentionDays` |
 | `captures/<id>.pcapng` + `captures.json` | Recordings and their index (name, connection, filter, times, counts); `<id>.meta.json` / `<id>.stop` are the helper's status and stop-flag files |
@@ -144,7 +187,8 @@ tools/make_icon.py ------------------------>  assets/linktest.{ico,png}   (commi
 build.py  (per platform; --wsl for Linux from Windows)
    PyInstaller --onefile --add-data ui --add-data assets --add-binary bin/<tag>/*
    -> dist/win64/LinkTest.exe (~20 MB)   dist/linux-x86_64/LinkTest (~240 MB, QtWebEngine)
-   + VERSION.txt + THIRD-PARTY-LICENSES.txt
+   + VERSION.txt + THIRD-PARTY-LICENSES.txt + build.json + "Update LinkTest.cmd" / update-linktest.sh
+   build_info.json (commit, branch, source folder, build Python) is bundled for the updater
 ```
 
 Frozen layout: data under `sys._MEIPASS` (`ui/`, `assets/`, `bin/`);

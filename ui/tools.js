@@ -1369,8 +1369,123 @@ function wireCapture() {
   $('#pcFollow').onclick = pcFollow;
   $('#pcImport').onclick = async () => { const r = await api('/api/pcap/import', {}); if (r.error === 'not-windowed') { const p = prompt('Path of the .pcap or .pcapng file'); if (p) { const r2 = await api('/api/pcap/open', { path: p }); if (r2.error) toast(r2.error); else { pcList(); pcOpen(r2.capture.id); } } } else if (r.error) toast(r.error); else if (r.ok) { pcList(); pcOpen(r.capture.id); } };
   wireZeek();
-  $('#verPill').onclick = showNotes;
+  $('#verPill').onclick = () => { if (UPD.st && UPD.st.info && UPD.st.info.available && UPD.st.canUpdate) openUpdates(); else showNotes(); };
+  wireUpdates();
   $('#notesClose').onclick = () => $('#notesDialog').close();
+}
+
+/* ------------------------------------------------------------------------ */
+/* Updates and tray (About dialog)                                          */
+/* ------------------------------------------------------------------------ */
+const UPD = { st: null, busy: false };
+
+function updAgo(ts) {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+
+function updRender() {
+  const st = UPD.st; if (!st) return;
+  const info = st.info || {};
+  const build = st.commit ? ` (build ${st.commit}${st.branch && st.branch !== 'main' ? ', ' + st.branch : ''})` : '';
+  let text, changes = [];
+  if (!st.canUpdate) text = `LinkTest ${st.version}${build}. ${st.why}`;
+  else if (UPD.busy) text = 'Checking GitHub…';
+  else if (info.error) text = `LinkTest ${st.version}${build}. Could not check for updates: ${info.error}`;
+  else if (!info.checkedAt) text = `LinkTest ${st.version}${build}. Not checked yet.`;
+  else if (info.problem) text = `An update is on GitHub, but ${info.problem}.`;
+  else if (info.available) {
+    const n = info.behind || 0;
+    text = info.behind
+      ? `LinkTest ${info.latestVersion || ''} is available: ${n} change${n === 1 ? '' : 's'} since this version${build}. Updating closes LinkTest, rebuilds it (a minute or two) and opens it again.`
+      : `The source folder has a newer build than this LinkTest${build}. Updating rebuilds it (a minute or two) and opens it again.`;
+    changes = info.changes || [];
+  } else text = `LinkTest ${st.version}${build} is up to date (checked ${updAgo(info.checkedAt)}).`;
+  $('#updState').textContent = text;
+  const ul = $('#updChanges');
+  ul.innerHTML = changes.map(c => `<li>${esc(c.replace(/^[0-9a-f]{7,}\s+/, ''))}</li>`).join('');
+  ul.classList.toggle('hidden', !changes.length);
+  $('#updCheck').classList.toggle('hidden', !st.canUpdate);
+  $('#updCheck').disabled = UPD.busy;
+  $('#updGo').classList.toggle('hidden', !(st.canUpdate && info.available && !info.problem));
+  $('#updAuto').checked = !!st.updateCheck;
+  $('#updAuto').closest('.checks').classList.toggle('hidden', !st.canUpdate);
+  $('#trayBox').classList.toggle('hidden', !st.windowed);
+  $('#trayMin').checked = !!st.trayMinimize;
+  $('#trayClose').checked = !!st.trayClose;
+  $('#trayMin').disabled = $('#trayClose').disabled = !st.tray;
+  $('#trayNote').textContent = st.tray ? 'Clicking the tray icon opens LinkTest again' + (st.trayMenu ? '; right-click it for Update and Quit.' : '. Update and Quit are here in About.')
+    : 'No system tray was found on this desktop, so minimizing and closing work as usual.';
+  const pill = $('#verPill');
+  const upd = st.canUpdate && info.available && !info.problem;
+  pill.textContent = 'v' + st.version + (upd ? ' · update' : '');
+  pill.classList.toggle('upd', !!upd);
+  pill.title = upd ? `LinkTest ${info.latestVersion || ''} is available. Click to update.` : "What's new in this version";
+}
+
+async function updLoad() {
+  const st = await api('/api/update/status');
+  if (!st.error) { UPD.st = st; updRender(); if (st.prompt) updPrompt(); }
+  return st;
+}
+
+function updPrompt() {
+  const dlg = $('#updDialog'), info = UPD.st.info || {};
+  if (dlg.open || $('#aboutDialog').open) return;
+  api('/api/update/prompted', {});   // one prompt per launch, even with several windows
+  const n = info.behind || 0;
+  $('#updDlgTitle').textContent = `LinkTest ${info.latestVersion || ''} is available`.replace('  ', ' ');
+  $('#updDlgText').textContent = n
+    ? `You have ${UPD.st.version}. ${n} change${n === 1 ? '' : 's'} since then:`
+    : `The source folder has a newer build than this LinkTest (${UPD.st.version}).`;
+  const ch = info.changes || [];
+  $('#updDlgChanges').innerHTML = ch.map(c => `<li>${esc(c.replace(/^[0-9a-f]{7,}\s+/, ''))}</li>`).join('');
+  $('#updDlgChanges').classList.toggle('hidden', !ch.length);
+  dlg.showModal();
+}
+
+// Right after launch the check takes a few seconds: look again until it has run.
+async function updWaitLaunchCheck() {
+  for (let i = 0; i < 40; i++) {
+    const st = await updLoad();
+    if (st.error || !st.canUpdate || !st.updateCheck || (st.info && st.info.checkedAt)) return;
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+function openUpdates() {
+  $('#aboutDialog').showModal();
+  $('#updHead').scrollIntoView({ block: 'start' });
+}
+
+function wireUpdates() {
+  $('#updCheck').onclick = async () => {
+    UPD.busy = true; updRender();
+    const r = await api('/api/update/check', {});
+    UPD.busy = false;
+    if (!r.offline) { UPD.st = r; }
+    updRender();
+  };
+  $('#updGo').onclick = async () => {
+    const r = await api('/api/update/start', {});
+    if (r.error) toast(r.error);
+    else { toast('Updating: a progress window opens; LinkTest closes and comes back on its own.'); $('#aboutDialog').close(); }
+  };
+  const save = async (patch) => { await api('/api/settings', { patch }); await updLoad(); };
+  $('#updAuto').onchange = e => save({ updateCheck: e.target.checked });
+  $('#trayMin').onchange = e => save({ trayMinimize: e.target.checked });
+  $('#trayClose').onchange = e => save({ trayClose: e.target.checked });
+  $('#btnQuit').onclick = async () => { await api('/api/quit', {}); };
+  $('#updSkip').onclick = () => $('#updDialog').close();
+  $('#updNow').onclick = async () => {
+    $('#updDialog').close();
+    const r = await api('/api/update/start', {});
+    if (r.error) toast(r.error);
+    else toast('Updating: a progress window opens; LinkTest closes and comes back on its own.');
+  };
+  $('#btnAbout').addEventListener('click', updLoad);
+  updWaitLaunchCheck();
+  setInterval(updLoad, 10 * 60 * 1000);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1804,7 +1919,7 @@ async function initTools() {
   T.settings = st.settings || {};
   wfLoadFilters(); applyCollapsed();
   showTab(T.settings.lastTab || 'speed', false);
-  api('/api/status').then(st => { if (st.app) $('#verPill').textContent = 'v' + st.app.version; });
+  api('/api/status').then(st => { if (st.app && !UPD.st) $('#verPill').textContent = 'v' + st.app.version; });
   await pmLoad();
 }
 initTools();

@@ -299,6 +299,11 @@ dialog li { margin: 4px 0; }
 /* version pill + release notes */
 .verpill { border: 0; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 600; }
 .verpill:hover { background: var(--accent-soft); color: var(--accent); }
+.verpill.upd { background: var(--accent-soft); color: var(--accent); }
+.upd-changes { margin: 0 0 8px; padding-left: 20px; max-height: 160px; overflow: auto; }
+.upd-changes li { margin: 2px 0; overflow-wrap: anywhere; }
+.upd-btns { gap: 8px; margin: 4px 0 8px; }
+.upd-opts { grid-template-columns: 1fr; margin: 4px 0 8px; }
 .notes-body h2 { font-size: 16px; margin: 14px 0 4px; }
 .notes-body h2:first-child { margin-top: 0; }
 .notes-body h1 { display: none; }

@@ -156,6 +156,50 @@ Settings and history live in `%LOCALAPPDATA%\LinkTest` (Windows),
 - macOS has no button: the system asks "accept incoming connections?" by
   itself the first time LinkTest listens for a test.
 
+## Updating LinkTest
+
+**About → Updates → Update LinkTest** (or the tray icon's menu on Windows)
+pulls the latest code from GitHub into the source folder the executable was
+built from, rebuilds it, and restarts it. A small window shows the progress
+(checking, downloading, building, restarting) with the full log under **Show
+details**; **Run in background** hides it and lets the update finish. If the
+build fails, LinkTest keeps the previous version and starts it again.
+
+What happens, step by step (`updater.py`):
+
+1. `git fetch` the branch the source folder is on and fast-forward to it. It
+   refuses, and changes nothing, if the folder has local edits or commits of
+   its own.
+2. Stop if nothing changed and the executable is already that build.
+3. `pip install -r requirements.txt` when requirements.txt changed (or a
+   build package is missing).
+4. Close the running LinkTest (PyInstaller cannot overwrite a running exe),
+   run `build.py`, copy the new executable over the one that asked for the
+   update (wherever it lives), and start it again.
+
+When LinkTest starts it checks GitHub and, if there is a new version, asks
+**Update now** or **Skip for now** (skip asks again at the next start). It
+checks again twice a day while running and shows **v… · update** in the header
+when something new is there. About → Updates turns the checks off. It works for any
+executable built with `python build.py` from a git checkout: the build records
+its commit, the source folder and the Python that built it inside the
+executable. Git must be installed. If the source folder or that Python moves,
+build once by hand to refresh it. `Update LinkTest.cmd` (Windows) /
+`update-linktest.sh` next to the build in `dist/` runs the same update in a
+console; `python updater.py --check` only reports.
+
+## Running in the system tray
+
+Minimizing the window hides it to the system tray (the icon next to the
+clock). Click the icon to bring it back; on Windows right-click it for **Open
+LinkTest**, **Update LinkTest** and **Quit LinkTest**. About → Window turns
+minimize-to-tray off, or makes closing the window keep LinkTest running in the
+tray too (so the ping monitor keeps watching), with a **Quit LinkTest** button
+there. Starting LinkTest again while it is in the tray brings the window back.
+Linux uses the X11 system tray (KDE, Xfce, Cinnamon, MATE; GNOME needs the
+AppIndicator extension), where the icon has no menu; without a tray,
+minimizing and closing work as before.
+
 ## Running from source
 
 Python 3.10+ (3.14 tested). `python linktest.py --browser` needs nothing beyond

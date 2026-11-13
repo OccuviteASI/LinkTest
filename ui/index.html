@@ -683,11 +683,36 @@
   </div>
 </dialog>
 
+<dialog id="updDialog">
+  <div class="dlg-head"><h2 id="updDlgTitle">A new version of LinkTest is available</h2></div>
+  <p id="updDlgText"></p>
+  <ul id="updDlgChanges" class="hint upd-changes hidden"></ul>
+  <p class="hint">Updating closes LinkTest, rebuilds it from GitHub (a minute or two) and opens it again. Anything running (a speed test, a capture) stops.</p>
+  <div class="row wrap upd-btns" style="justify-content:flex-end"><button id="updSkip" class="btn">Skip for now</button><button id="updNow" class="btn primary">Update now</button></div>
+</dialog>
+
 <dialog id="aboutDialog">
   <div class="dlg-head"><h2>About LinkTest</h2><button class="icon-btn" id="aboutClose">✕</button></div>
   <p>LinkTest <b id="aboutVer"></b> is a network toolbox for people who are not network engineers. Everything works offline, needs no installation and no administrator rights (except recording packets, which asks once).</p>
   <p id="aboutEngine"></p>
   <p class="hint" id="aboutState"></p>
+
+  <h3 id="updHead">Updates</h3>
+  <p id="updState" class="hint">Checking…</p>
+  <ul id="updChanges" class="hint upd-changes hidden"></ul>
+  <div class="row wrap upd-btns"><button id="updCheck" class="btn small">Check for updates</button><button id="updGo" class="btn small primary hidden">Update LinkTest</button></div>
+  <div class="checks upd-opts">
+    <label><input type="checkbox" id="updAuto"> Check for updates when LinkTest starts (and twice a day)</label>
+  </div>
+  <div id="trayBox">
+    <h3>Window</h3>
+    <div class="checks upd-opts">
+      <label><input type="checkbox" id="trayMin"> Minimize to the tray</label>
+      <label><input type="checkbox" id="trayClose"> Keep running in the tray when the window is closed</label>
+    </div>
+    <p class="hint" id="trayNote"></p>
+    <button id="btnQuit" class="btn small">Quit LinkTest</button>
+  </div>
 
   <h3>Speed test</h3>
   <p><b>What it is for:</b> measuring how fast two computers can move data between each other, which tells you what your cable, Wi‑Fi or switch really delivers.</p>

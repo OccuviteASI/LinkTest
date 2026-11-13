@@ -3,6 +3,33 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.12.0 - 2026-11-13
+
+- **Update LinkTest from GitHub** (like SNMPathy): About → Updates (and the
+  tray menu) checks GitHub, lists what changed, and **Update LinkTest** pulls
+  the latest code into the source folder the executable was built from,
+  rebuilds it with the same Python, replaces the executable and restarts it.
+  A progress window shows each step with the full log under Show details; a
+  failed build leaves the previous version running, and the update confirms
+  the new LinkTest really started (its output goes to dist/update-start.log). It refuses (changing
+  nothing) when the source folder has local edits or its own commits, and
+  installs the build packages when requirements.txt changed. LinkTest checks
+  twice a day and shows "v… · update" in the header when there is something
+  new. When LinkTest starts and finds an update it asks **Update now** or
+  **Skip for now** (once per start, in one window; skipping asks again next
+  start). About can turn the checks off. `python updater.py --check` reports from a
+  terminal; `Update LinkTest.cmd` next to the build runs it in a console.
+- **System tray**: minimizing hides LinkTest to the tray; click the icon to
+  bring it back. On Windows the icon's menu has Open, Update and Quit. About →
+  Window can make closing the window keep LinkTest running in the tray too
+  (the ping monitor keeps watching), and has a Quit button. Starting LinkTest
+  again while it sits in the tray brings the window back. Linux uses the X11
+  tray (no menu there); with no tray, minimize and close work as before.
+- Builds record their commit, branch, source folder and build Python
+  (`build_info.json` inside the executable, `build.json` next to it).
+- New build packages: pystray and Pillow (`pip install -r requirements.txt`;
+  the first update installs them itself).
+
 ## 0.11.2 - 2026-11-13
 
 - Ping monitor: a middle hop whose loss does not carry on to the hops after
