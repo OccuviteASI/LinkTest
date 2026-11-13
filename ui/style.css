@@ -28,6 +28,9 @@
   }
 }
 * { box-sizing: border-box; }
+/* Always keep room for the vertical scrollbar, so short tabs (Ping monitor, DNS) and long ones
+   (Speed test, Scan) centre the page at the same place instead of jumping sideways. */
+html { scrollbar-gutter: stable; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 a { color: var(--accent); }

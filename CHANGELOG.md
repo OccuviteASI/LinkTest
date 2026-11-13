@@ -3,6 +3,13 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.13.4 - 2026-11-13
+
+- Switching tabs no longer shifts the page sideways. Short tabs (Ping
+  monitor, DNS lookup, an empty Packet capture) had no scrollbar, so the page
+  was centred 7 px further right than on the long ones. The scrollbar's room
+  is now always kept (`scrollbar-gutter: stable`).
+
 ## 0.13.3 - 2026-11-13
 
 - **Right-click in a text field** now offers Cut, Copy, Paste and Select all
