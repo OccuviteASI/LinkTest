@@ -32,14 +32,14 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.12.2"
+VERSION = "0.13.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
 WINDOW_SIZE = (1160, 940)
 WINDOW_MIN = (820, 600)
 HEARTBEAT_GRACE = 90  # browser mode only: seconds without a heartbeat before closing
-UPDATE_CHECK_EVERY = 12 * 3600
+UPDATE_CHECK_EVERY = 30 * 60   # while running, so the Update now button shows up
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _BUILD_INFO: dict | None = None
 
@@ -399,7 +399,7 @@ class App:
 
     def update_loop(self) -> None:
         """Check GitHub right after launch (the UI then offers Update now / Skip for now) and twice
-        a day after that. About > Updates can turn it off."""
+        every 30 minutes after that (the header's Update now button). About > Updates can turn it off."""
         time.sleep(3)
         while not self._shutting_down:
             if self.settings.get("updateCheck", True) and self.updater()[0]:

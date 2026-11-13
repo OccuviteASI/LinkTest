@@ -19,7 +19,8 @@
   </div>
   <div class="top-right">
     <span id="enginePill" class="pill pill-muted" title="The iperf3 engine LinkTest uses">iperf3: checking…</span>
-    <button id="verPill" class="pill pill-muted verpill" title="What's new in this version">v…</button>
+    <button id="updNowBtn" class="updnow" hidden>Update now</button>
+    <button id="verPill" class="pill pill-muted verpill" title="What's new, and check for updates">v…</button>
     <button id="btnAbout" class="icon-btn" title="About LinkTest">?</button>
   </div>
 </header>
@@ -702,7 +703,7 @@
   <ul id="updChanges" class="hint upd-changes hidden"></ul>
   <div class="row wrap upd-btns"><button id="updCheck" class="btn small">Check for updates</button><button id="updGo" class="btn small primary hidden">Update LinkTest</button></div>
   <div class="checks upd-opts">
-    <label><input type="checkbox" id="updAuto"> Check for updates when LinkTest starts (and twice a day)</label>
+    <label><input type="checkbox" id="updAuto"> Check for updates when LinkTest starts and every 30 minutes</label>
   </div>
   <div id="trayBox">
     <h3>Window</h3>
@@ -752,6 +753,7 @@
 
 <dialog id="notesDialog">
   <div class="dlg-head"><h2>What's new</h2><button class="icon-btn" id="notesClose">✕</button></div>
+  <div class="notes-upd"><span id="notesUpdState" class="hint"></span><span class="row upd-btns"><button id="notesUpdCheck" class="btn small">Check for updates</button><button id="notesUpdGo" class="btn small primary hidden">Update now</button></span></div>
   <div id="notesBody" class="notes-body"></div>
 </dialog>
 

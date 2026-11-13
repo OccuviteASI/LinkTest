@@ -3,6 +3,20 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.13.0 - 2026-11-13
+
+- **Update now** button in the header, next to the version number, pulsing
+  brighter/darker (like KASTR) whenever an update is waiting; one click
+  updates (it turns into "Updating…"). While running, LinkTest now checks
+  GitHub every 30 minutes (was twice a day) so the button shows up soon after
+  something is pushed.
+- Clicking the version number checks for updates straight away and shows
+  the result at the top of What's new, with Check for updates and Update now.
+- The header no longer adds "· update" to the version pill; the button
+  replaces it.
+- The update progress window closes by itself 5 seconds after a successful
+  update (with a countdown); after a failure it stays open with the details.
+
 ## 0.12.2 - 2026-11-13
 
 - About → Updates also says when this copy of LinkTest was built (next to

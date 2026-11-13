@@ -6,7 +6,9 @@ a progress bar and a one-line status, and keeps the full log under "Show details
 Options are passed on to updater.py (--exe, --have, --pid, --port, --force ...).
 It is its own process so it outlives LinkTest, which the update closes.
 
-Without Tk the update still runs, silently, logging to dist/update.log.
+After a successful update the window closes itself after a few seconds; after
+a failure it stays open with the details. Without Tk the update still runs,
+silently, logging to dist/update.log.
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ UPDATER = os.path.join(ROOT, "updater.py")
 IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LOG_FILE = os.path.join(ROOT, "dist", "update.log")
+AUTO_CLOSE = 5   # seconds the window stays after a successful update
 
 # (pattern in the updater / build output, progress %, status shown)
 STAGES: list[tuple[str, int, str]] = [
@@ -201,6 +204,16 @@ class UpdateWindow:
         self.close_btn["text"] = "Close"
         if self.root.state() == "withdrawn":   # hidden while running: nothing left to show
             self.root.destroy()
+        elif self.outcome != "failed":         # success: close by itself; a failure stays to be read
+            self.done_text = self.status["text"]
+            self.countdown(AUTO_CLOSE)
+
+    def countdown(self, left: int) -> None:
+        if left <= 0:
+            self.root.destroy()
+            return
+        self.status["text"] = f"{self.done_text}  This window closes in {left} s."
+        self.root.after(1000, self.countdown, left - 1)
 
     def add_log(self, line: str) -> None:
         self.log_lines.append(line)

@@ -179,8 +179,10 @@ What happens, step by step (`updater.py`):
 
 When LinkTest starts it checks GitHub and, if there is a new version, asks
 **Update now** or **Skip for now** (skip asks again at the next start). It
-checks again twice a day while running and shows **v… · update** in the header
-when something new is there. About → Updates turns the checks off. It works for any
+checks again every 30 minutes while running, and a pulsing **Update now**
+button appears next to the version in the header when something new is there
+(one click updates). Clicking the version number shows what's new with a
+**Check for updates** button. About → Updates turns the checks off. It works for any
 executable built with `python build.py` from a git checkout: the build records
 its commit, the source folder and the Python that built it inside the
 executable. Git must be installed. If the source folder or that Python moves,

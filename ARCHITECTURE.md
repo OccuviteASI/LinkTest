@@ -61,7 +61,7 @@ App.start_update ──spawn──> update_gui.py (Tk progress) ──> updater.
 Python) into the bundle; `build_info()` reads it (or git when run from source)
 and `App.updater()` says whether an update is possible. `/api/update/check`
 runs `updater.py --check --json` (cached 10 min); `update_loop` checks 3 s
-after launch and every 12 h. Status carries `prompt: true` after a launch
+after launch and every 30 min (the header's pulsing Update now button). Status carries `prompt: true` after a launch
 check found an update and no window has asked yet; the UI then shows the
 Update now / Skip for now dialog and posts `/api/update/prompted`. Programs
 the app starts get `clean_env()`: a frozen LinkTest's `_PYI_*` and
