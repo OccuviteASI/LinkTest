@@ -3,6 +3,14 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.13.1 - 2026-11-13
+
+- A maximized window comes back maximized from the tray (after minimize or
+  close to tray). It used to come back as a normal window, and that was then
+  saved, so the next launch was not maximized either.
+- Position is no longer saved while the window is minimized (Windows parks
+  minimized windows at -32000,-32000).
+
 ## 0.13.0 - 2026-11-13
 
 - **Update now** button in the header, next to the version number, pulsing

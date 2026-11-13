@@ -40,7 +40,8 @@ the tray instead, if any) and exits.
 Tray (`tray.py`, pystray on its own thread; win32 backend on Windows, X11 on
 Linux, none on macOS): `minimized` hides the window (`App.on_minimized`),
 `closing` is cancelled and the window hidden when "keep running in the tray"
-is on and it is the last visible one (`App.on_closing`); `App.quit()` destroys
+is on and it is the last visible one (`App.on_closing`); `show_windows` brings each one back maximized if its geometry state
+(`App.win_state`) says it was, otherwise `restore()`. `App.quit()` destroys
 all windows so `webview.start()` returns. `Tray.ok` is True only when the icon
 really docked (an X11 tray owner exists), so a window is never hidden with no
 way back. pystray's X11 icon window does not select ButtonPress; `tray.py`

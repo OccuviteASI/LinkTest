@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.13.0"
+VERSION = "0.13.1"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -142,6 +142,7 @@ class App:
         self.windowed = windowed
         self.windows: list = []          # live pywebview windows
         self.hidden: list = []           # windows hidden to the tray
+        self.win_state: dict = {}        # window -> its geometry state ({"maximized": bool, ...})
         self.tray = None
         self._quitting = False
         self.update_info: dict | None = None
@@ -232,6 +233,7 @@ class App:
             pass
         if win in self.hidden:
             self.hidden.remove(win)
+        self.win_state.pop(win, None)
         # The last visible window was closed while others sit in the tray: closing means quit
         # unless "keep running in the tray" is on.
         if (self.windows and not self._quitting and all(w in self.hidden for w in self.windows)
@@ -298,7 +300,12 @@ class App:
         for w in wins:
             try:
                 w.show()
-                w.restore()
+                # Back the way it went into the tray: restore() would turn a maximized window into
+                # a normal one (and that would then be saved for the next launch).
+                if self.win_state.get(w, {}).get("maximized"):
+                    w.maximize()
+                else:
+                    w.restore()
             except Exception:
                 pass
 
@@ -1017,7 +1024,8 @@ def _wire_geometry_saving(app: App, win):
             g = dict(app.settings.get("window") or {})
             if not state["maximized"]:
                 w, h, x, y = win.width, win.height, win.x, win.y
-                if w >= WINDOW_MIN[0] // 2 and h >= WINDOW_MIN[1] // 2:
+                # Windows parks a minimized window at -32000,-32000: not a place to reopen at
+                if w >= WINDOW_MIN[0] // 2 and h >= WINDOW_MIN[1] // 2 and x > -30000 and y > -30000:
                     g.update({"width": int(w), "height": int(h), "x": int(x), "y": int(y)})
             g["maximized"] = state["maximized"]
             app.settings["window"] = g
@@ -1069,6 +1077,7 @@ def open_native_window(app: App, url: str):
     win.events.closing += lambda: app.on_closing(win)      # runs first: may keep it in the tray
     win.events.minimized += lambda: app.on_minimized(win)
     state = _wire_geometry_saving(app, win)
+    app.win_state[win] = state
 
     def on_shown():
         # Pull the window back if the saved spot is on a monitor that is no longer there.
