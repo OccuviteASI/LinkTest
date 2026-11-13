@@ -90,6 +90,7 @@ are not re-litigated. Update statuses in the same pass as CHANGELOG.md.
 
 | ID | Area | Requirement | Status | Source | Verified |
 |---|---|---|---|---|---|
+| R-077 | Ping monitor | Route table marks a middle hop whose loss does not continue to later hops / the destination as "limits its replies" (not real loss: ICMP time-exceeded rate limiting / low priority), greyed loss with explanation; loss that continues stays red | done 0.11.2 | Kenton 2026-11-13 (coworker: hop 10.10.40.1 showed ~30% loss on the way to 10.10.253.110, 0% when pinged directly) | `pmLimitedHops` checked in node on six routes (the coworker's, loss carrying through, too few probes, silent hop after it, last visible hop, small loss); route table rendered in the browser with that route |
 | N-001 | Runtime | No administrator / root rights needed for any shipped tool | done 0.3.0 | derived | Firewall helper is the one elevation, user-initiated |
 | N-002 | Runtime | No third-party Python packages at runtime beyond pywebview (and PySide6 on Linux) for the window | done 0.2.0 | derived | requirements.txt |
 | N-003 | Runtime | No network traffic other than the test itself (no telemetry, no update checks) | done 0.2.0 | Kenton 2026-09-08 | Code review: no urllib at runtime |

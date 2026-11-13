@@ -615,25 +615,45 @@ function pmBuildRoute(t) {
   const note = $('.proutenote', t.el);
   if (!route.length) note.textContent = t.stats.routeState === 'discovering' ? 'Finding the route…' : t.stats.hopsOn ? 'The route will appear once the first replies arrive.' : '';
   else note.textContent = (t.stats.routeState === 'partial' ? 'The last routers before the destination do not answer, so the route is shown as far as it can be seen. ' : '') +
-    'Loss at a middle hop that does not continue to later hops is that router limiting its replies, not a real problem.';
+    'Loss at a middle hop that does not continue to later hops is that router limiting its replies, not a real problem; those hops are marked "limits its replies".';
+}
+// A middle hop whose loss does not carry on to the hops after it (or the destination)
+// is a router answering route probes at low priority / under a rate limit, not real loss.
+const HOP_LIMIT_MIN_SENT = 10;
+function pmLimitedHops(route) {
+  const out = new Map(); let after = null;  // lowest loss among the measured hops further on
+  for (let i = route.length - 1; i >= 0; i--) {
+    const h = route[i], measured = h.sent >= HOP_LIMIT_MIN_SENT && (h.ip || h.dest);
+    if (measured && !h.dest && after != null && h.lossPct >= 3 && after <= h.lossPct / 2 && h.lossPct - after >= 2) out.set(h.n, after);
+    if (measured) after = after == null ? h.lossPct : Math.min(after, h.lossPct);
+  }
+  return out;
 }
 function pmPatchRoute(t) {
   const s = t.stats; const el = t.el;
+  const limited = pmLimitedHops(s.route || []);
   for (const h of s.route || []) {
     const tr = $(`.hops tr[data-n="${h.n}"]`, el); if (!tr) continue;
     tr.classList.toggle('dim', !h.ip); tr.classList.toggle('stale', !!h.stale); tr.classList.toggle('dest', !!h.dest);
     $('.h-ip', tr).textContent = h.ip || (h.dest ? s.ip || '' : '—');
     $('.h-name', tr).innerHTML = (h.dest ? `<span class="pill pill-good" style="font-size:11px;margin-right:6px">destination</span>` : '') + esc(h.name || (h.ip ? '' : 'no reply from this hop')) +
       (h.flapping ? ` <span class="pill pill-muted" style="font-size:11px" title="This hop answers from more than one address (load balancing)">${h.addresses} addresses</span>` : '') +
-      (h.changes ? ` <span class="pill pill-muted" style="font-size:11px" title="Times this hop's address changed">${h.changes} change${h.changes === 1 ? '' : 's'}</span>` : '');
+      (h.changes ? ` <span class="pill pill-muted" style="font-size:11px" title="Times this hop's address changed">${h.changes} change${h.changes === 1 ? '' : 's'}</span>` : '') +
+      (limited.has(h.n) ? ` <span class="pill pill-muted" style="font-size:11px" title="${esc(pmLimitedTip(h, limited.get(h.n)))}">limits its replies</span>` : '');
     $('.h-avg', tr).textContent = h.avg != null ? fmtMs(h.avg) : '—';
     $('.h-min', tr).textContent = h.min != null ? fmtMs(h.min) : '—';
     $('.h-cur', tr).textContent = h.cur != null ? fmtMs(h.cur) : '—';
     const lossEl = $('.h-loss', tr); lossEl.textContent = h.sent ? fmtPct(h.lossPct) : '—';
-    lossEl.className = 'h-loss ' + (h.lossPct > 5 ? 'bad' : h.lossPct > 1 ? 'warn' : '');
+    lossEl.className = 'h-loss ' + (limited.has(h.n) ? 'limited' : h.lossPct > 5 ? 'bad' : h.lossPct > 1 ? 'warn' : '');
+    lossEl.title = limited.has(h.n) ? pmLimitedTip(h, limited.get(h.n)) : '';
     const ring = h.dest ? t.samples.slice(-120).filter(x => x.st !== 'gap' && x.st !== 'unresolved').map(x => ({ ts: x.ts, rtt: x.rtt })) : ((t.hops.get(h.n) || {}).ring || []);
     drawHopSpark($('canvas.hspark', tr), ring, t.ymax || 5);
   }
+}
+function pmLimitedTip(h, after) {
+  return `Not real loss. ${fmtPct(h.lossPct)} of this router's replies to route probes are missing, but traffic through it ` +
+    `goes on to the later hops and the destination with ${fmtPct(after)} loss. Routers answer route probes ("time exceeded") ` +
+    `at low priority and cap how many they send, so pinging this router directly usually shows no loss.`;
 }
 function drawHopSpark(canvas, ring, ymax) {
   const dpr = window.devicePixelRatio || 1, W = 110, H = 22;

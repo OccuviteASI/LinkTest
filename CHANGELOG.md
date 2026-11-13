@@ -3,6 +3,18 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.11.2 - 2026-11-13
+
+- Ping monitor: a middle hop whose loss does not carry on to the hops after
+  it is marked **"limits its replies"**, and its loss figure is greyed with
+  an explanation on hover. Routers answer route probes ("time exceeded") at
+  low priority and cap how many they send, so such a hop can show 30% loss
+  on the route while pinging it directly shows none, and traffic through it
+  reaches the destination without loss. A hop is marked once it has at least
+  10 probes, 3% loss or more, and the hops further on lose at most half as
+  much (and at least 2 points less). Loss that does continue to the
+  destination stays red.
+
 ## 0.11.1 - 2026-10-09
 
 - Scan network: NetBIOS is now asked for every address still without a MAC,

@@ -171,6 +171,10 @@ of the result = the build host's (2.38 needed by the Python runtime).
   `start/stop/state/running` shape; `PingMonitor` is the exception: many
   targets, one loop thread each, plus a shared hop-probe pool (rounds are
   skipped rather than queued when the pool is busy; silent hops back off).
+  Hop interpretation stays in the UI: `pmLimitedHops` (tools.js) marks a
+  middle hop "limits its replies" when its loss does not continue to the
+  measured hops after it, since routers rate-limit the ICMP time-exceeded
+  replies route probes depend on.
 - **Threads are daemon**; shutdown flushes ping CSVs, stops iperf3, then exits.
 
 ## 8. Testing recipes
