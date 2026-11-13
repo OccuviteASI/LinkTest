@@ -3,6 +3,11 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.12.2 - 2026-11-13
+
+- About → Updates also says when this copy of LinkTest was built (next to
+  its build number). Released to try the in-app update from 0.12.1.
+
 ## 0.12.1 - 2026-11-13
 
 - build.py (Windows) stops straight away with a clear message when

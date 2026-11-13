@@ -1387,7 +1387,8 @@ function updAgo(ts) {
 function updRender() {
   const st = UPD.st; if (!st) return;
   const info = st.info || {};
-  const build = st.commit ? ` (build ${st.commit}${st.branch && st.branch !== 'main' ? ', ' + st.branch : ''})` : '';
+  const built = st.built ? new Date(st.built).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const build = st.commit ? ` (build ${st.commit}${st.branch && st.branch !== 'main' ? ', ' + st.branch : ''}${built ? ', built ' + built : ''})` : '';
   let text, changes = [];
   if (!st.canUpdate) text = `LinkTest ${st.version}${build}. ${st.why}`;
   else if (UPD.busy) text = 'Checking GitHub…';
