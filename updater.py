@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Update LinkTest: pull the latest code from GitHub, rebuild the executable and restart it.
 
-    tray menu / About > Update LinkTest   (runs this through update_gui.py: a progress window)
+    tray menu / Settings > Update LinkTest (runs this through update_gui.py: a progress window)
     "Update LinkTest.cmd" next to LinkTest.exe, or: python updater.py
 
 Steps:

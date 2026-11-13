@@ -1375,7 +1375,7 @@ function wireCapture() {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Updates and tray (About dialog)                                          */
+/* Updates and tray (Settings dialog)                                       */
 /* ------------------------------------------------------------------------ */
 const UPD = { st: null, busy: false };
 
@@ -1420,7 +1420,7 @@ function updRender() {
   $('#trayMin').checked = !!st.trayMinimize;
   $('#trayClose').checked = !!st.trayClose;
   $('#trayMin').disabled = $('#trayClose').disabled = !st.tray;
-  $('#trayNote').textContent = st.tray ? 'Clicking the tray icon opens LinkTest again' + (st.trayMenu ? '; right-click it for Update and Quit.' : '. Update and Quit are here in About.')
+  $('#trayNote').textContent = st.tray ? 'Clicking the tray icon opens LinkTest again' + (st.trayMenu ? '; right-click it for Update and Quit.' : '. Update and Quit are here in Settings.')
     : 'No system tray was found on this desktop, so minimizing and closing work as usual.';
 }
 
@@ -1464,7 +1464,7 @@ async function updLoad() {
 
 function updPrompt() {
   const dlg = $('#updDialog'), info = UPD.st.info || {};
-  if (dlg.open || $('#aboutDialog').open) return;
+  if (dlg.open || $('#settingsDialog').open) return;
   api('/api/update/prompted', {});   // one prompt per launch, even with several windows
   const n = info.behind || 0;
   $('#updDlgTitle').textContent = `LinkTest ${info.latestVersion || ''} is available`.replace('  ', ' ');
@@ -1489,7 +1489,7 @@ async function updWaitLaunchCheck() {
 function wireUpdates() {
   $('#updCheck').onclick = updCheckNow;
   $('#notesUpdCheck').onclick = updCheckNow;
-  $('#updGo').onclick = async () => { if (!(await updStartNow()).error) $('#aboutDialog').close(); };
+  $('#updGo').onclick = async () => { if (!(await updStartNow()).error) $('#settingsDialog').close(); };
   $('#notesUpdGo').onclick = async () => { if (!(await updStartNow()).error) $('#notesDialog').close(); };
   $('#updNowBtn').onclick = updStartNow;
   const save = async (patch) => { await api('/api/settings', { patch }); await updLoad(); };
@@ -1499,7 +1499,8 @@ function wireUpdates() {
   $('#btnQuit').onclick = async () => { await api('/api/quit', {}); };
   $('#updSkip').onclick = () => $('#updDialog').close();
   $('#updNow').onclick = () => { $('#updDialog').close(); updStartNow(); };
-  $('#btnAbout').addEventListener('click', updLoad);
+  $('#btnSettings').onclick = () => { updLoad(); $('#settingsDialog').showModal(); };
+  $('#settingsClose').onclick = () => $('#settingsDialog').close();
   updWaitLaunchCheck();
   setInterval(updLoad, 60 * 1000);   // cheap: reads the result of the app's own background check
 }

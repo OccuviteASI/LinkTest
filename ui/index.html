@@ -21,6 +21,7 @@
     <span id="enginePill" class="pill pill-muted" title="The iperf3 engine LinkTest uses">iperf3: checking…</span>
     <button id="updNowBtn" class="updnow" hidden>Update now</button>
     <button id="verPill" class="pill pill-muted verpill" title="What's new, and check for updates">v…</button>
+    <button id="btnSettings" class="icon-btn icon-cog" title="Settings: updates and window" aria-label="Settings"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.31-.09.63-.09.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg></button>
     <button id="btnAbout" class="icon-btn" title="About LinkTest">?</button>
   </div>
 </header>
@@ -692,13 +693,9 @@
   <div class="row wrap upd-btns" style="justify-content:flex-end"><button id="updSkip" class="btn">Skip for now</button><button id="updNow" class="btn primary">Update now</button></div>
 </dialog>
 
-<dialog id="aboutDialog">
-  <div class="dlg-head"><h2>About LinkTest</h2><button class="icon-btn" id="aboutClose">✕</button></div>
-  <p>LinkTest <b id="aboutVer"></b> is a network toolbox for people who are not network engineers. Everything works offline, needs no installation and no administrator rights (except recording packets, which asks once).</p>
-  <p id="aboutEngine"></p>
-  <p class="hint" id="aboutState"></p>
-
-  <h3 id="updHead">Updates</h3>
+<dialog id="settingsDialog">
+  <div class="dlg-head"><h2>Settings</h2><button class="icon-btn" id="settingsClose">✕</button></div>
+  <h3 id="updHead" class="first">Updates</h3>
   <p id="updState" class="hint">Checking…</p>
   <ul id="updChanges" class="hint upd-changes hidden"></ul>
   <div class="row wrap upd-btns"><button id="updCheck" class="btn small">Check for updates</button><button id="updGo" class="btn small primary hidden">Update LinkTest</button></div>
@@ -714,6 +711,13 @@
     <p class="hint" id="trayNote"></p>
     <button id="btnQuit" class="btn small">Quit LinkTest</button>
   </div>
+</dialog>
+
+<dialog id="aboutDialog">
+  <div class="dlg-head"><h2>About LinkTest</h2><button class="icon-btn" id="aboutClose">✕</button></div>
+  <p>LinkTest <b id="aboutVer"></b> is a network toolbox for people who are not network engineers. Everything works offline, needs no installation and no administrator rights (except recording packets, which asks once).</p>
+  <p id="aboutEngine"></p>
+  <p class="hint" id="aboutState"></p>
 
   <h3>Speed test</h3>
   <p><b>What it is for:</b> measuring how fast two computers can move data between each other, which tells you what your cable, Wi‑Fi or switch really delivers.</p>

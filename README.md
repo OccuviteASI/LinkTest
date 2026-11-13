@@ -158,7 +158,7 @@ Settings and history live in `%LOCALAPPDATA%\LinkTest` (Windows),
 
 ## Updating LinkTest
 
-**About → Updates → Update LinkTest** (or the tray icon's menu on Windows)
+**Settings (the cog at the top right) → Updates → Update LinkTest** (or the tray icon's menu on Windows)
 pulls the latest code from GitHub into the source folder the executable was
 built from, rebuilds it, and restarts it. A small window shows the progress
 (checking, downloading, building, restarting) with the full log under **Show
@@ -182,7 +182,7 @@ When LinkTest starts it checks GitHub and, if there is a new version, asks
 checks again every 30 minutes while running, and a pulsing **Update now**
 button appears next to the version in the header when something new is there
 (one click updates). Clicking the version number shows what's new with a
-**Check for updates** button. About → Updates turns the checks off. It works for any
+**Check for updates** button. Settings → Updates turns the checks off. It works for any
 executable built with `python build.py` from a git checkout: the build records
 its commit, the source folder and the Python that built it inside the
 executable. Git must be installed. If the source folder or that Python moves,
@@ -194,7 +194,7 @@ console; `python updater.py --check` only reports.
 
 Minimizing the window hides it to the system tray (the icon next to the
 clock). Click the icon to bring it back; on Windows right-click it for **Open
-LinkTest**, **Update LinkTest** and **Quit LinkTest**. About → Window turns
+LinkTest**, **Update LinkTest** and **Quit LinkTest**. Settings → Window turns
 minimize-to-tray off, or makes closing the window keep LinkTest running in the
 tray too (so the ping monitor keeps watching), with a **Quit LinkTest** button
 there. Starting LinkTest again while it is in the tray brings the window back.

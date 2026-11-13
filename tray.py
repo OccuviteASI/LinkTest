@@ -1,9 +1,9 @@
 """System-tray icon for the native window (pystray).
 
-Minimizing the window hides it to the tray (and, if chosen in About, so does
+Minimizing the window hides it to the tray (and, if chosen in Settings, so does
 closing it); the icon's menu has Open LinkTest, Update LinkTest and Quit.
 Clicking the icon opens the window again. The X11 tray has no menu (pystray
-limitation): there Update and Quit are in About.
+limitation): there Update and Quit are in Settings.
 
 Windows uses pystray's win32 backend. Linux uses the X11 tray (the
 "system tray" of KDE, Xfce, Cinnamon, MATE; GNOME needs the AppIndicator

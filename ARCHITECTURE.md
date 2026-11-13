@@ -127,7 +127,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `/api/update/check` | POST | Run `updater.py --check` now; returns the same as status |
 | `/api/update/prompted` | POST | The launch prompt was answered; status stops returning `prompt: true` until the next launch |
 | `/api/update/start` | POST | Start the update (progress window; the app is closed and restarted by it). Same-origin only |
-| `/api/quit` | POST | Quit LinkTest (all windows; used by About and the updater). Same-origin only |
+| `/api/quit` | POST | Quit LinkTest (all windows; used by Settings and the updater). Same-origin only |
 | `/api/pings/targets` | GET | Targets with stats, recent samples and per-hop recent samples (load/reload only) |
 | `/api/pings/samples?since` | GET | Events (`sample`, `hops`, `route`, `outage`, `recovery`, `removed`) + a stats snapshot per target (route rows without samples) |
 | `/api/pings/history?id&hours`, `/api/pings/csv?id&days` | GET | Backfill / export from day files |

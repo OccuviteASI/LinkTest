@@ -3,6 +3,11 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.13.2 - 2026-11-13
+
+- **Settings** button (a cog, next to "?" at the top right): the Updates and
+  Window options moved there from About, which now only explains the tools.
+
 ## 0.13.1 - 2026-11-13
 
 - A maximized window comes back maximized from the tray (after minimize or

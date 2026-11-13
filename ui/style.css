@@ -47,6 +47,8 @@ pre { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border
 .pill-good { background: var(--good-soft); color: var(--good); }
 .pill-bad { background: var(--bad-soft); color: var(--bad); }
 .icon-btn { border: 1px solid var(--line); background: var(--card); color: var(--muted); width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-weight: 700; }
+.icon-btn.icon-cog { display: inline-grid; place-items: center; padding: 0; }
+dialog h3.first { margin-top: 4px; }
 .icon-btn:hover { color: var(--text); border-color: var(--soft); }
 
 main { max-width: 1180px; margin: 0 auto; padding: 8px 28px 40px; }
