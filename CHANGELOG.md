@@ -3,6 +3,15 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.12.1 - 2026-11-13
+
+- build.py (Windows) stops straight away with a clear message when
+  LinkTest.exe is still running, instead of failing at the end of the
+  PyInstaller run with "PermissionError: Access is denied". Since 0.12.0
+  minimizing hides LinkTest in the tray, so it is easy to think it is closed.
+  The message says to quit it from the tray icon or with
+  `taskkill /IM LinkTest.exe /F`. (The in-app update closes it by itself.)
+
 ## 0.12.0 - 2026-11-13
 
 - **Update LinkTest from GitHub** (like SNMPathy): About → Updates (and the

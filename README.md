@@ -252,6 +252,10 @@ The library list is what QtWebEngine needs to import during the build (and
 what the finished binary expects on the target desktop; any distro with a
 graphical session already has them).
 
+On Windows, quit LinkTest before building (it may be hidden in the tray:
+right-click the icon > Quit LinkTest); `build.py` stops with that hint if the
+exe is still in use.
+
 Other flags: `--console` keeps a console window on Windows for debugging,
 `--onedir` produces a folder build that starts instantly.
 

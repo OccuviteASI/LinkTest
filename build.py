@@ -105,6 +105,20 @@ def git_info() -> dict:
             "dirty": bool(run("status", "--porcelain", "--untracked-files=no"))}
 
 
+def exe_in_use(path: str) -> bool:
+    """Windows keeps a running exe open; opening it for writing then fails (checked before a
+    two-minute PyInstaller run that would only fail at the very end)."""
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r+b"):
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def write_build_info(ver: str) -> str:
     """build_info.json, bundled into the executable: which commit it is and where its source and
     build Python live, so "Update LinkTest" can pull, rebuild and replace it (updater.py)."""
@@ -195,6 +209,10 @@ def build_here(console: bool, onedir: bool) -> int:
     if app_bundle:
         out = os.path.join(app_bundle, "Contents", "MacOS", NAME)
         shutil.rmtree(app_bundle, ignore_errors=True)
+    if WINDOWS and exe_in_use(out):
+        sys.exit(f"build: {out} is in use -- LinkTest is still running (it may be hidden in the tray by the clock).\n"
+                 "       Quit it from the tray icon (right-click > Quit LinkTest) or run: taskkill /IM LinkTest.exe /F\n"
+                 "       then build again.")
     before = os.path.getmtime(out) if os.path.exists(out) else 0
     print(f"Building {NAME} {ver} for {TAG} ({'onedir' if onedir else 'onefile'}) ...")
     t0 = time.time()
