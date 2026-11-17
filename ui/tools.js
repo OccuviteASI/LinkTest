@@ -1507,13 +1507,19 @@ function updRender() {
   else if (info.error) text = `LinkTest ${st.version}${build}. Could not check for updates: ${info.error}`;
   else if (!info.checkedAt) text = `LinkTest ${st.version}${build}. Not checked yet.`;
   else if (info.problem) text = `An update is on GitHub, but ${info.problem}.`;
-  else if (info.available) {
+  else if (info.available && st.mode === 'release') {
+    text = `LinkTest ${info.latestVersion} is available (you have ${st.version}). ${updHow(st)}`;
+    changes = info.changes || [];
+  } else if (info.available) {
     const n = info.behind || 0;
     text = info.behind
       ? `LinkTest ${info.latestVersion || ''} is available: ${n} change${n === 1 ? '' : 's'} since this version${build}. Updating closes LinkTest, rebuilds it (a minute or two) and opens it again.`
       : `The source folder has a newer build than this LinkTest${build}. Updating rebuilds it (a minute or two) and opens it again.`;
     changes = info.changes || [];
   } else text = `LinkTest ${st.version}${build} is up to date (checked ${updAgo(info.checkedAt)}).`;
+  const pr = st.progress;
+  if (pr && pr.phase === 'error') text = `The update failed: ${pr.error}`;
+  else if (pr && pr.phase) text = updPhaseText(pr);
   $('#updState').textContent = text;
   $('#notesUpdState').textContent = text;
   $('#notesUpdCheck').classList.toggle('hidden', !st.canUpdate);
@@ -1542,7 +1548,39 @@ function updRenderTop() {
   const upd = !!(st.canUpdate && info.available && !info.problem);
   if (btn.dataset.busy !== '1') {
     btn.hidden = !upd;
-    btn.title = upd ? `LinkTest ${info.latestVersion || 'update'} is available (you have ${st.version}). Click to update now; LinkTest closes, rebuilds and comes back.` : '';
+    btn.title = upd ? `LinkTest ${info.latestVersion || 'update'} is available (you have ${st.version}). Click to update now. ${updHow(st)}` : '';
+  }
+}
+
+function updHow(st) {
+  const a = (st.info || {}).asset, mb = a && a.size ? ` (${Math.round(a.size / 1e6)} MB)` : '';
+  return st.mode === 'release'
+    ? `Updating downloads it from GitHub${mb}, closes LinkTest and opens the new version.`
+    : 'Updating closes LinkTest, rebuilds it from GitHub (a minute or two) and opens it again.';
+}
+
+function updPhaseText(pr) {
+  if (pr.phase === 'download') return pr.total ? `Downloading LinkTest ${pr.version || ''}: ${Math.floor(100 * pr.done / pr.total)}%` : 'Downloading…';
+  if (pr.phase === 'install') return 'Installing…';
+  if (pr.phase === 'restart') return `Restarting with LinkTest ${pr.version || ''}…`;
+  return '';
+}
+
+// In-app (release) update: follow the download in the button and Settings until LinkTest restarts.
+async function updFollow() {
+  const btn = $('#updNowBtn');
+  for (;;) {
+    await new Promise(r => setTimeout(r, 400));
+    const st = await api('/api/update/status');
+    if (st.offline) { btn.textContent = 'Restarting…'; return; }   // the old LinkTest has closed
+    UPD.st = st; updRender();
+    const pr = st.progress || {};
+    if (pr.phase === 'error') {
+      toast(`The update failed: ${pr.error}`);
+      btn.dataset.busy = ''; btn.classList.remove('busy'); btn.textContent = 'Update now'; updRender();
+      return;
+    }
+    btn.textContent = pr.phase === 'download' && pr.total ? `Downloading ${Math.floor(100 * pr.done / pr.total)}%` : updPhaseText(pr) || 'Updating…';
   }
 }
 
@@ -1563,7 +1601,8 @@ async function updStartNow() {
   if (r.error) {
     toast(r.error);
     btn.dataset.busy = ''; btn.classList.remove('busy'); btn.textContent = 'Update now'; updRender();
-  } else toast('Updating: a progress window opens; LinkTest closes and comes back on its own.');
+  } else if (r.inApp) { toast('Downloading the new LinkTest; it restarts by itself when it is ready.'); updFollow(); }
+  else toast('Updating: a progress window opens; LinkTest closes and comes back on its own.');
   return r;
 }
 
@@ -1579,12 +1618,15 @@ function updPrompt() {
   api('/api/update/prompted', {});   // one prompt per launch, even with several windows
   const n = info.behind || 0;
   $('#updDlgTitle').textContent = `LinkTest ${info.latestVersion || ''} is available`.replace('  ', ' ');
-  $('#updDlgText').textContent = n
+  $('#updDlgText').textContent = UPD.st.mode === 'release'
+    ? `You have ${UPD.st.version}.` + ((info.changes || []).length ? ' What changed:' : '')
+    : n
     ? `You have ${UPD.st.version}. ${n} change${n === 1 ? '' : 's'} since then:`
     : `The source folder has a newer build than this LinkTest (${UPD.st.version}).`;
   const ch = info.changes || [];
   $('#updDlgChanges').innerHTML = ch.map(c => `<li>${esc(c.replace(/^[0-9a-f]{7,}\s+/, ''))}</li>`).join('');
   $('#updDlgChanges').classList.toggle('hidden', !ch.length);
+  $('#updDlgHow').textContent = updHow(UPD.st);
   dlg.showModal();
 }
 

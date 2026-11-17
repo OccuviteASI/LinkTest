@@ -47,7 +47,26 @@ really docked (an X11 tray owner exists), so a window is never hidden with no
 way back. pystray's X11 icon window does not select ButtonPress; `tray.py`
 adds it after docking.
 
-Update (`updater.py` + `update_gui.py`, run from the source folder with the
+Two update modes (`App.update_mode()`): **release** for any frozen copy whose
+recorded source folder is not there (everyone the exe was handed to), and
+**source** for the developer's own build.
+
+Release mode (`selfupdate.py`, inside the app): `.github/workflows/release.yml`
+builds `LinkTest-win64.exe` on windows-latest for every VERSION on main that
+has no `v<VERSION>` release yet, smoke-tests it (`--no-open`, `/api/ping`
+must report the version), and publishes it with `release.json` and
+`SHA256SUMS.txt` (`tools/release_info.py`; notes = the CHANGELOG section).
+The app reads `github.com/<repo>/releases/latest/download/release.json`
+(a plain download: no API rate limit), lists the changes newer than its own
+version from `history`, downloads the asset to `<exe>.new.part`, checks the
+SHA-256, renames the running exe to `<exe>.old` (Windows allows renaming a
+running exe, not overwriting it), moves the new one in, starts it with
+`--after-update <pid>` (it waits for the old process to exit before the
+single-instance check) and quits; the new one deletes `<exe>.old`.
+`/api/update/status.progress` carries {phase: download|install|restart|error,
+done, total} for the UI. `LINKTEST_UPDATE_URL` points tests at a local copy.
+
+Source mode (`updater.py` + `update_gui.py`, run from the source folder with the
 build Python, outside the app because the update closes it):
 
 ```
@@ -90,6 +109,8 @@ foreign `Origin`. Lock: `dist/update.lock`; log of the last update:
 | `ui/style.css` | Design tokens (light/dark via `prefers-color-scheme`), components. |
 | `fetch-helpers.py` | Downloads and SHA-256-pins bundled helpers into `bin/<tag>/` and `assets/` (iperf3 per platform, MAC vendor table). Never used at runtime. |
 | `tray.py` | System-tray icon (pystray): Open / Update / Quit menu, `ok` only when really docked; X11 click fix. |
+| `selfupdate.py` | Release-mode update (copies without a source folder): read `release.json` from the latest GitHub release, download + SHA-256 check, rename the running exe aside, put the new one in place. |
+| `tools/release_info.py` | For the release workflow: VERSION, `release.json` (changes per version from CHANGELOG, asset SHA-256), notes, SHA256SUMS. |
 | `updater.py` | Update from GitHub: fetch + fast-forward the followed branch, pip when requirements changed, close the app (`/api/quit`), `build.py`, copy over the exe that asked, restart; `--check --json` for the app. |
 | `update_gui.py` | Tk progress window around `updater.py` (status line, bar, details log, run in background); silent fallback without Tk. |
 | `build.py` | PyInstaller one-file build for the current platform; `--wsl` runs the Linux build inside WSL; on macOS emits `LinkTest.app` + zip (`finish_mac_bundle` patches Info.plist and ad-hoc signs). `build-mac.sh` wraps venv + fetch + build; `MACOS.md` documents it. |

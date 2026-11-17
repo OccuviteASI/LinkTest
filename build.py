@@ -139,7 +139,7 @@ def pyinstaller_cmd(console: bool, onedir: bool, binaries: list[str]) -> list[st
            "--add-data", os.path.join(HERE, "CHANGELOG.md") + SEP + ".",
            "--add-data", os.path.join(WORK, "build_info.json") + SEP + ".",
            "--hidden-import", "pcaplogs", "--hidden-import", "pcapproto", "--hidden-import", "zeek_tables",
-           "--hidden-import", "tray", "--hidden-import", "PIL.Image", "--hidden-import", "PIL.ImageDraw",
+           "--hidden-import", "tray", "--hidden-import", "selfupdate", "--hidden-import", "PIL.Image", "--hidden-import", "PIL.ImageDraw",
            "--exclude-module", "tkinter", "--exclude-module", "unittest",
            "--exclude-module", "webview.platforms.cef", "--exclude-module", "webview.platforms.android",
            "--exclude-module", "webview.platforms.mshtml"]

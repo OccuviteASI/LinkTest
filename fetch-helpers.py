@@ -12,8 +12,8 @@ Targets and where they land (all verified against the SHA-256 pins below):
   manuf         assets/manuf.z (MAC vendor table)    wireshark.org 'manuf' (GPL-2 data)
 
 Run once per checkout; bin/ contents are git-ignored, assets/manuf.z is
-committed. Nothing here runs at LinkTest runtime; the shipped app never
-downloads anything. When refreshing the vendor table, download, then paste
+committed. Nothing here runs at LinkTest runtime (the app itself only
+downloads its own updates, from GitHub releases; see selfupdate.py). When refreshing the vendor table, download, then paste
 the new sha256 the script prints (the Wireshark file changes weekly, so its
 pin is expected to go stale; re-pin deliberately, never auto-accept).
 """

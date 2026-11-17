@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.13.4"
+VERSION = "0.14.0"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -186,6 +186,7 @@ class App:
         self.tray = None
         self._quitting = False
         self.update_info: dict | None = None
+        self.update_progress: dict | None = None   # in-app (release) update: phase, done, total, error
         self.update_prompted = False     # the launch prompt was answered (once per launch, all windows)
         self._update_lock = threading.Lock()
         self.url = ""
@@ -308,7 +309,7 @@ class App:
             self.show_windows()
 
     def tray_update_label(self) -> str | None:
-        if self.updater()[0] is None:
+        if self.update_mode()[0] is None:
             return None
         info = self.update_info or {}
         if info.get("available"):
@@ -391,10 +392,34 @@ class App:
                           "Build once with python build.py to refresh it.")
         return py, src
 
+    def update_mode(self) -> tuple[str | None, str]:
+        """How this copy updates: "source" (pull + rebuild in the folder it was built from, the
+        developer's PC), "release" (download the GitHub release: every copy handed to someone
+        else), or (None, why not) when running from source without git."""
+        py, why = self.updater()
+        if py:
+            return "source", ""
+        if getattr(sys, "frozen", False):
+            return "release", ""
+        return None, why
+
     def check_update(self, force: bool = False) -> dict:
+        mode, why = self.update_mode()
+        if mode is None:
+            return {"error": why}
+        if mode == "release":
+            with self._update_lock:
+                info = self.update_info
+                if info and not force and time.time() - info.get("checkedAt", 0) < 600:
+                    return info
+                import selfupdate
+                info = selfupdate.check(VERSION, ir.plat_tag())
+                info["checkedAt"] = time.time()
+                self.update_info = info
+            if self.tray:
+                self.tray.refresh()
+            return info
         py, src = self.updater()
-        if py is None:
-            return {"error": src}
         with self._update_lock:
             info = self.update_info
             if info and not force and time.time() - info.get("checkedAt", 0) < 600:
@@ -418,11 +443,14 @@ class App:
         return info
 
     def start_update(self) -> dict:
-        py, src = self.updater()
-        if py is None:
+        mode, why = self.update_mode()
+        if mode is None:
             if self.tray:
-                self.tray.notify(src)
-            return {"error": src}
+                self.tray.notify(why)
+            return {"error": why}
+        if mode == "release":
+            return self.start_release_update()
+        py, src = self.updater()
         gui_py = py
         if IS_WIN and os.path.basename(py).lower() == "python.exe":
             alt = os.path.join(os.path.dirname(py), "pythonw.exe")
@@ -444,12 +472,57 @@ class App:
             return {"error": f"Could not start the updater: {e}"}
         return {"ok": True}
 
+    def start_release_update(self) -> dict:
+        """Download the GitHub release, swap the executable and restart, all inside LinkTest."""
+        if (self.update_progress or {}).get("phase") in ("download", "install", "restart"):
+            return {"ok": True, "inApp": True}
+        info = self.update_info or {}
+        if not info.get("asset") or info.get("error"):
+            info = self.check_update(force=True)
+        if info.get("error"):
+            return {"error": info["error"]}
+        if not info.get("available"):
+            return {"error": "LinkTest is already the latest version."}
+        if info.get("problem"):
+            return {"error": f"Cannot update: {info['problem']}."}
+        self.update_progress = {"phase": "download", "done": 0, "total": (info.get("asset") or {}).get("size", 0),
+                                "version": info.get("latestVersion")}
+        threading.Thread(target=self._release_update, args=(info,), name="self-update", daemon=True).start()
+        return {"ok": True, "inApp": True}
+
+    def _release_update(self, info: dict) -> None:
+        import selfupdate
+        exe = sys.executable
+        try:
+            def progress(done, total):
+                self.update_progress.update(done=done, total=total)
+            new = selfupdate.download(info, exe, progress)
+            self.update_progress = {"phase": "install", "version": info.get("latestVersion")}
+            selfupdate.install(exe, new)
+            self.update_progress = {"phase": "restart", "version": info.get("latestVersion")}
+            env = clean_env()
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            cmd = [exe, "--after-update", str(os.getpid())]
+            if IS_WIN:
+                subprocess.Popen(cmd, env=env, cwd=os.path.dirname(exe), creationflags=0x00000008 | 0x00000200,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.Popen(cmd, env=env, cwd=os.path.dirname(exe), start_new_session=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.5)   # the page shows "Restarting…" before this window goes
+            self.quit()
+        except Exception as e:
+            msg = str(e) if isinstance(e, selfupdate.UpdateError) else f"{type(e).__name__}: {e}"
+            self.update_progress = {"phase": "error", "error": msg}
+            if self.tray:
+                self.tray.notify(f"LinkTest update failed: {msg}")
+
     def update_loop(self) -> None:
         """Check GitHub right after launch (the UI then offers Update now / Skip for now) and twice
         every 30 minutes after that (the header's Update now button). Settings > Updates can turn it off."""
         time.sleep(3)
         while not self._shutting_down:
-            if self.settings.get("updateCheck", True) and self.updater()[0]:
+            if self.settings.get("updateCheck", True) and self.update_mode()[0]:
                 self.check_update(force=True)
             time.sleep(UPDATE_CHECK_EVERY)
 
@@ -598,10 +671,12 @@ class Handler(BaseHTTPRequestHandler):
     def _update_status(self) -> dict:
         app = self.app
         b = build_info()
-        py, why = app.updater()
+        mode, why = app.update_mode()
+        py = mode is not None
         return {"version": VERSION, "commit": (b.get("commit") or "")[:7], "branch": b.get("branch") or "",
                 "frozen": bool(b.get("frozen")), "built": b.get("built"), "source": b.get("source") or "",
-                "canUpdate": py is not None, "why": "" if py else why, "info": app.update_info,
+                "canUpdate": py, "mode": mode, "why": why, "info": app.update_info,
+                "progress": app.update_progress,
                 "tray": app.tray_ok(), "trayMenu": bool(app.tray and app.tray.has_menu), "windowed": app.windowed,
                 "trayMinimize": app.settings.get("trayMinimize", True), "trayClose": bool(app.settings.get("trayClose")),
                 "updateCheck": app.settings.get("updateCheck", True),
@@ -1179,6 +1254,36 @@ def run_windowed(app: App, url: str, sd: str, verbose: bool) -> bool:
     return True
 
 
+def _pid_alive(pid: int) -> bool:
+    if IS_WIN:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x00100000 | 0x1000, False, pid)   # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            return k32.WaitForSingleObject(h, 0) == 0x102       # WAIT_TIMEOUT: still running
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _cleanup_after_update() -> None:
+    """Delete LinkTest.exe.old once the old process has let go of it."""
+    import selfupdate
+    for _ in range(30):
+        selfupdate.cleanup(sys.executable)
+        if not os.path.exists(sys.executable + ".old"):
+            return
+        time.sleep(2)
+
+
 def request_window(port: int) -> bool:
     """Ask an already-running LinkTest to open another window."""
     try:
@@ -1219,7 +1324,17 @@ def main(argv=None) -> int:
                     help="open in the default browser instead of a native window")
     ap.add_argument("--no-open", action="store_true", help="just run the server; print the URL")
     ap.add_argument("--verbose", action="store_true", help="log HTTP requests / enable devtools")
+    ap.add_argument("--after-update", type=int, default=0, help=argparse.SUPPRESS)
     ns = ap.parse_args(argv)
+    if ns.after_update:
+        # Started by an in-app update: let the old LinkTest finish closing before the
+        # single-instance check, or this one would just ask the old one for a window and exit.
+        for _ in range(60):
+            if not _pid_alive(ns.after_update):
+                break
+            time.sleep(0.5)
+    if getattr(sys, "frozen", False):
+        threading.Thread(target=_cleanup_after_update, daemon=True).start()
 
     sd = state_dir()
     if not ns.no_open:

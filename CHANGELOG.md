@@ -3,6 +3,22 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.14.0 - 2026-11-17
+
+- **Updates for everyone, not only the PC that builds LinkTest.** Copies
+  handed to other people said "this copy of LinkTest was not built with the
+  updater": the updater pulled and rebuilt from the source folder recorded
+  in the exe, which only exists on the developer's PC. Now GitHub builds
+  every new version on main and publishes it as a release
+  (LinkTest-win64.exe, its SHA-256 and the changes), and a copy without its
+  source folder downloads that, checks it, swaps itself and restarts. The
+  Update now button and Settings show the download progress. No Python or
+  git needed. The developer's own copy still pulls and rebuilds as before.
+- The update prompt and Settings list every change since the version you
+  have, also when several versions were skipped.
+- Copies of 0.13.x that came from someone else cannot update to this one by
+  themselves; download LinkTest-win64.exe from the latest GitHub release once.
+
 ## 0.13.4 - 2026-11-13
 
 - Switching tabs no longer shifts the page sideways. Short tabs (Ping
