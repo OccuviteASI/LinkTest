@@ -1521,6 +1521,9 @@ function updRender() {
   if (pr && pr.phase === 'error') text = `The update failed: ${pr.error}`;
   else if (pr && pr.phase) text = updPhaseText(pr);
   $('#updState').textContent = text;
+  $('#updSource').textContent = st.mode === 'release'
+    ? 'Updates come from the ready-made releases on GitHub (github.com/OccuviteASI/LinkTest/releases).'
+    : st.mode === 'source' ? `Updates are pulled and built in the source folder ${st.source}.` : '';
   $('#notesUpdState').textContent = text;
   $('#notesUpdCheck').classList.toggle('hidden', !st.canUpdate);
   $('#notesUpdCheck').disabled = UPD.busy;

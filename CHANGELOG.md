@@ -3,6 +3,12 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.14.1 - 2026-11-17
+
+- Settings → Updates says where this copy gets its updates from: the
+  ready-made GitHub releases, or (on the PC that builds LinkTest) its source
+  folder. Released to try the new in-app update from 0.14.0.
+
 ## 0.14.0 - 2026-11-17
 
 - **Updates for everyone, not only the PC that builds LinkTest.** Copies
