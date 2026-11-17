@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.14.2"
+VERSION = "0.14.3"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
