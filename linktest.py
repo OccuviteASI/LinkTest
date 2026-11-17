@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.14.1"
+VERSION = "0.14.2"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -393,14 +393,16 @@ class App:
         return py, src
 
     def update_mode(self) -> tuple[str | None, str]:
-        """How this copy updates: "source" (pull + rebuild in the folder it was built from, the
-        developer's PC), "release" (download the GitHub release: every copy handed to someone
-        else), or (None, why not) when running from source without git."""
+        """How this copy updates: "release" (download the ready-made GitHub release: every built
+        copy, by default), "source" (pull + rebuild in the folder it was built from: running from
+        source, or a built copy whose owner chose it in Settings), or (None, why not)."""
         py, why = self.updater()
+        if getattr(sys, "frozen", False):
+            if py and self.settings.get("updateFrom") == "source":
+                return "source", ""
+            return "release", ""
         if py:
             return "source", ""
-        if getattr(sys, "frozen", False):
-            return "release", ""
         return None, why
 
     def check_update(self, force: bool = False) -> dict:
@@ -676,6 +678,8 @@ class Handler(BaseHTTPRequestHandler):
         return {"version": VERSION, "commit": (b.get("commit") or "")[:7], "branch": b.get("branch") or "",
                 "frozen": bool(b.get("frozen")), "built": b.get("built"), "source": b.get("source") or "",
                 "canUpdate": py, "mode": mode, "why": why, "info": app.update_info,
+                # a built copy that still has its source folder may choose to rebuild from it
+                "sourceChoice": bool(getattr(sys, "frozen", False) and app.updater()[0]),
                 "progress": app.update_progress,
                 "tray": app.tray_ok(), "trayMenu": bool(app.tray and app.tray.has_menu), "windowed": app.windowed,
                 "trayMinimize": app.settings.get("trayMinimize", True), "trayClose": bool(app.settings.get("trayClose")),
@@ -872,6 +876,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"cmd": ir.quote_cmd([os.path.basename(exe)] + args)})
             if p == "/api/settings":
                 patch = body.get("patch") or {}
+                if "updateFrom" in patch and patch["updateFrom"] != app.settings.get("updateFrom"):
+                    app.update_info = None          # the last check was for the other source
                 app.settings.update(patch)
                 app.save_settings()
                 return self._json({"settings": app.settings})

@@ -1535,6 +1535,8 @@ function updRender() {
   $('#updCheck').disabled = UPD.busy;
   $('#updGo').classList.toggle('hidden', !(st.canUpdate && info.available && !info.problem));
   $('#updAuto').checked = !!st.updateCheck;
+  $('#updFromBox').classList.toggle('hidden', !st.sourceChoice);
+  $('#updFromSource').checked = st.mode === 'source';
   $('#updAuto').closest('.checks').classList.toggle('hidden', !st.canUpdate);
   $('#trayBox').classList.toggle('hidden', !st.windowed);
   $('#trayMin').checked = !!st.trayMinimize;
@@ -1650,6 +1652,7 @@ function wireUpdates() {
   $('#updNowBtn').onclick = updStartNow;
   const save = async (patch) => { await api('/api/settings', { patch }); await updLoad(); };
   $('#updAuto').onchange = e => save({ updateCheck: e.target.checked });
+  $('#updFromSource').onchange = async e => { await save({ updateFrom: e.target.checked ? 'source' : 'release' }); updCheckNow(); };
   $('#trayMin').onchange = e => save({ trayMinimize: e.target.checked });
   $('#trayClose').onchange = e => save({ trayClose: e.target.checked });
   $('#btnQuit').onclick = async () => { await api('/api/quit', {}); };

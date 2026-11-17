@@ -47,9 +47,11 @@ really docked (an X11 tray owner exists), so a window is never hidden with no
 way back. pystray's X11 icon window does not select ButtonPress; `tray.py`
 adds it after docking.
 
-Two update modes (`App.update_mode()`): **release** for any frozen copy whose
-recorded source folder is not there (everyone the exe was handed to), and
-**source** for the developer's own build.
+Two update modes (`App.update_mode()`): **release** for every frozen copy
+(default), and **source** when running from a checkout, or for a frozen copy
+whose recorded source folder is still there and whose settings say
+`updateFrom: "source"` (Settings → Updates, shown only then as
+`sourceChoice`).
 
 Release mode (`selfupdate.py`, inside the app): `.github/workflows/release.yml`
 builds `LinkTest-win64.exe` on windows-latest for every VERSION on main that
@@ -178,7 +180,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 
 | Path | Content |
 |---|---|
-| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `trayMinimize` (default on), `trayClose` (default off), `trayHintShown`, `updateCheck` (default on). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
+| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `updateFrom` ("release" default / "source"), `trayMinimize` (default on), `trayClose` (default off), `trayHintShown`, `updateCheck` (default on). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
 | `history.json` | Speed-test results (≤ 300), each `{id, ts, label?, mode, opts, cmd, summary, intervals, iperfVersion, host}` |
 | `pings/<targetId>/<YYYY-MM-DD>.csv` | `ts,rtt_ms,status` per sample; written every 5 s; pruned after `pingRetentionDays` |
 | `captures/<id>.pcapng` + `captures.json` | Recordings and their index (name, connection, filter, times, counts); `<id>.meta.json` / `<id>.stop` are the helper's status and stop-flag files |

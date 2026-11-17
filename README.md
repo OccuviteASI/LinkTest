@@ -160,22 +160,23 @@ Settings and history live in `%LOCALAPPDATA%\LinkTest` (Windows),
 
 **Settings (the cog at the top right) → Updates → Update LinkTest** (or the
 pulsing **Update now** button, or the tray icon's menu on Windows) updates
-LinkTest from GitHub. There are two ways, picked automatically:
+LinkTest from GitHub. There are two ways:
 
 - **Ready-made releases (everyone).** For every new version on `main`, GitHub
   builds `LinkTest-win64.exe` (`.github/workflows/release.yml`), checks that it
   starts, and publishes it as a release with a `release.json` (version,
-  changes, SHA-256). A copy of LinkTest without its source folder downloads
-  the new exe, checks its SHA-256, swaps itself (the running exe is renamed
+  changes, SHA-256). Every built copy of LinkTest downloads the new exe, checks its SHA-256, swaps itself (the running exe is renamed
   to `LinkTest.exe.old`, removed at the next start) and restarts, showing the
   progress in the button and in Settings. No Python or git needed. LinkTest
   must be in a folder the user can write to (not Program Files). Copies
   older than 0.14.0 cannot do this yet: give them `LinkTest-win64.exe` from
   the [latest release](https://github.com/OccuviteASI/LinkTest/releases/latest)
   once.
-- **From source (the developer's PC).** An exe built with `python build.py`
-  in a git checkout that is still there pulls the latest code into that
-  folder, rebuilds it, and restarts it. A small window shows the progress
+- **From source (opt-in).** On the PC that builds LinkTest, Settings →
+  Updates offers "Build updates from my source folder instead of downloading
+  them": the exe then pulls the latest code into the git checkout it was
+  built from, rebuilds it, and restarts it. Running `python linktest.py`
+  from a checkout always updates this way. A small window shows the progress
   (checking, downloading, building, restarting) with the full log under
   **Show details**; **Run in background** hides it and lets the update
   finish. If the build fails, LinkTest keeps the previous version and starts
