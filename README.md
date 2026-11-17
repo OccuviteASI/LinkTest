@@ -158,54 +158,29 @@ Settings and history live in `%LOCALAPPDATA%\LinkTest` (Windows),
 
 ## Updating LinkTest
 
-**Settings (the cog at the top right) → Updates → Update LinkTest** (or the
-pulsing **Update now** button, or the tray icon's menu on Windows) updates
-LinkTest from GitHub. There are two ways:
+LinkTest updates itself by downloading the new version from GitHub. For every
+new version on `main`, GitHub builds `LinkTest-win64.exe`
+(`.github/workflows/release.yml`), checks that it starts, and publishes it as
+a [release](https://github.com/OccuviteASI/LinkTest/releases) with a
+`release.json` (version, changes, SHA-256).
 
-- **Ready-made releases (everyone).** For every new version on `main`, GitHub
-  builds `LinkTest-win64.exe` (`.github/workflows/release.yml`), checks that it
-  starts, and publishes it as a release with a `release.json` (version,
-  changes, SHA-256). Every built copy of LinkTest downloads the new exe, checks its SHA-256, swaps itself (the running exe is renamed
-  to `LinkTest.exe.old`, removed at the next start) and restarts, showing the
-  progress in the button and in Settings. No Python or git needed. LinkTest
-  must be in a folder the user can write to (not Program Files). Copies
-  older than 0.14.0 cannot do this yet: give them `LinkTest-win64.exe` from
-  the [latest release](https://github.com/OccuviteASI/LinkTest/releases/latest)
-  once.
-- **From source (opt-in).** On the PC that builds LinkTest, Settings →
-  Updates offers "Build updates from my source folder instead of downloading
-  them": the exe then pulls the latest code into the git checkout it was
-  built from, rebuilds it, and restarts it. Running `python linktest.py`
-  from a checkout always updates this way. A small window shows the progress
-  (checking, downloading, building, restarting) with the full log under
-  **Show details**; **Run in background** hides it and lets the update
-  finish. If the build fails, LinkTest keeps the previous version and starts
-  it again.
-
-What the source update does, step by step (`updater.py`):
-
-1. `git fetch` the branch the source folder is on and fast-forward to it. It
-   refuses, and changes nothing, if the folder has local edits or commits of
-   its own.
-2. Stop if nothing changed and the executable is already that build.
-3. `pip install -r requirements.txt` when requirements.txt changed (or a
-   build package is missing).
-4. Close the running LinkTest (PyInstaller cannot overwrite a running exe),
-   run `build.py`, copy the new executable over the one that asked for the
-   update (wherever it lives), and start it again.
-
-When LinkTest starts it checks GitHub and, if there is a new version, asks
+When LinkTest starts it checks for a new release and, if there is one, asks
 **Update now** or **Skip for now** (skip asks again at the next start). It
 checks again every 30 minutes while running, and a pulsing **Update now**
-button appears next to the version in the header when something new is there
-(one click updates). Clicking the version number shows what's new with a
-**Check for updates** button. Settings → Updates turns the checks off. It works for any
-executable built with `python build.py` from a git checkout: the build records
-its commit, the source folder and the Python that built it inside the
-executable. Git must be installed. If the source folder or that Python moves,
-build once by hand to refresh it. `Update LinkTest.cmd` (Windows) /
-`update-linktest.sh` next to the build in `dist/` runs the same update in a
-console; `python updater.py --check` only reports.
+button appears next to the version in the header when something new is there.
+Clicking the version number shows what's new with a **Check for updates**
+button; Settings (the cog) → Updates has the same, the list of changes, and a
+switch to turn the checks off. On Windows the tray icon's menu has Update too.
+
+Updating downloads the new exe (about 23 MB), checks its SHA-256, swaps
+itself (the running exe is renamed to `LinkTest.exe.old`, removed at the next
+start) and restarts, showing the progress in the button and in Settings. No
+Python or git needed. LinkTest must be in a folder the user can write to (not
+Program Files). Copies older than 0.14.0 cannot do this: give them
+`LinkTest-win64.exe` from the
+[latest release](https://github.com/OccuviteASI/LinkTest/releases/latest) once.
+Running from source (`python linktest.py`) does not update itself; use
+`git pull`.
 
 ## Running in the system tray
 

@@ -1507,23 +1507,15 @@ function updRender() {
   else if (info.error) text = `LinkTest ${st.version}${build}. Could not check for updates: ${info.error}`;
   else if (!info.checkedAt) text = `LinkTest ${st.version}${build}. Not checked yet.`;
   else if (info.problem) text = `An update is on GitHub, but ${info.problem}.`;
-  else if (info.available && st.mode === 'release') {
+  else if (info.available) {
     text = `LinkTest ${info.latestVersion} is available (you have ${st.version}). ${updHow(st)}`;
-    changes = info.changes || [];
-  } else if (info.available) {
-    const n = info.behind || 0;
-    text = info.behind
-      ? `LinkTest ${info.latestVersion || ''} is available: ${n} change${n === 1 ? '' : 's'} since this version${build}. Updating closes LinkTest, rebuilds it (a minute or two) and opens it again.`
-      : `The source folder has a newer build than this LinkTest${build}. Updating rebuilds it (a minute or two) and opens it again.`;
     changes = info.changes || [];
   } else text = `LinkTest ${st.version}${build} is up to date (checked ${updAgo(info.checkedAt)}).`;
   const pr = st.progress;
   if (pr && pr.phase === 'error') text = `The update failed: ${pr.error}`;
   else if (pr && pr.phase) text = updPhaseText(pr);
   $('#updState').textContent = text;
-  $('#updSource').textContent = st.mode === 'release'
-    ? 'Updates come from the ready-made releases on GitHub (github.com/OccuviteASI/LinkTest/releases).'
-    : st.mode === 'source' ? `Updates are pulled and built in the source folder ${st.source}.` : '';
+  $('#updSource').textContent = st.canUpdate ? 'Updates are the ready-made releases on GitHub.' : '';
   $('#notesUpdState').textContent = text;
   $('#notesUpdCheck').classList.toggle('hidden', !st.canUpdate);
   $('#notesUpdCheck').disabled = UPD.busy;
@@ -1535,8 +1527,6 @@ function updRender() {
   $('#updCheck').disabled = UPD.busy;
   $('#updGo').classList.toggle('hidden', !(st.canUpdate && info.available && !info.problem));
   $('#updAuto').checked = !!st.updateCheck;
-  $('#updFromBox').classList.toggle('hidden', !st.sourceChoice);
-  $('#updFromSource').checked = st.mode === 'source';
   $('#updAuto').closest('.checks').classList.toggle('hidden', !st.canUpdate);
   $('#trayBox').classList.toggle('hidden', !st.windowed);
   $('#trayMin').checked = !!st.trayMinimize;
@@ -1559,9 +1549,7 @@ function updRenderTop() {
 
 function updHow(st) {
   const a = (st.info || {}).asset, mb = a && a.size ? ` (${Math.round(a.size / 1e6)} MB)` : '';
-  return st.mode === 'release'
-    ? `Updating downloads it from GitHub${mb}, closes LinkTest and opens the new version.`
-    : 'Updating closes LinkTest, rebuilds it from GitHub (a minute or two) and opens it again.';
+  return `Updating downloads it from GitHub${mb}, closes LinkTest and opens the new version.`;
 }
 
 function updPhaseText(pr) {
@@ -1606,8 +1594,7 @@ async function updStartNow() {
   if (r.error) {
     toast(r.error);
     btn.dataset.busy = ''; btn.classList.remove('busy'); btn.textContent = 'Update now'; updRender();
-  } else if (r.inApp) { toast('Downloading the new LinkTest; it restarts by itself when it is ready.'); updFollow(); }
-  else toast('Updating: a progress window opens; LinkTest closes and comes back on its own.');
+  } else { toast('Downloading the new LinkTest; it restarts by itself when it is ready.'); updFollow(); }
   return r;
 }
 
@@ -1621,13 +1608,8 @@ function updPrompt() {
   const dlg = $('#updDialog'), info = UPD.st.info || {};
   if (dlg.open || $('#settingsDialog').open) return;
   api('/api/update/prompted', {});   // one prompt per launch, even with several windows
-  const n = info.behind || 0;
   $('#updDlgTitle').textContent = `LinkTest ${info.latestVersion || ''} is available`.replace('  ', ' ');
-  $('#updDlgText').textContent = UPD.st.mode === 'release'
-    ? `You have ${UPD.st.version}.` + ((info.changes || []).length ? ' What changed:' : '')
-    : n
-    ? `You have ${UPD.st.version}. ${n} change${n === 1 ? '' : 's'} since then:`
-    : `The source folder has a newer build than this LinkTest (${UPD.st.version}).`;
+  $('#updDlgText').textContent = `You have ${UPD.st.version}.` + ((info.changes || []).length ? ' What changed:' : '');
   const ch = info.changes || [];
   $('#updDlgChanges').innerHTML = ch.map(c => `<li>${esc(c.replace(/^[0-9a-f]{7,}\s+/, ''))}</li>`).join('');
   $('#updDlgChanges').classList.toggle('hidden', !ch.length);
@@ -1652,7 +1634,6 @@ function wireUpdates() {
   $('#updNowBtn').onclick = updStartNow;
   const save = async (patch) => { await api('/api/settings', { patch }); await updLoad(); };
   $('#updAuto').onchange = e => save({ updateCheck: e.target.checked });
-  $('#updFromSource').onchange = async e => { await save({ updateFrom: e.target.checked ? 'source' : 'release' }); updCheckNow(); };
   $('#trayMin').onchange = e => save({ trayMinimize: e.target.checked });
   $('#trayClose').onchange = e => save({ trayClose: e.target.checked });
   $('#btnQuit').onclick = async () => { await api('/api/quit', {}); };

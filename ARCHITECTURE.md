@@ -47,13 +47,8 @@ really docked (an X11 tray owner exists), so a window is never hidden with no
 way back. pystray's X11 icon window does not select ButtonPress; `tray.py`
 adds it after docking.
 
-Two update modes (`App.update_mode()`): **release** for every frozen copy
-(default), and **source** when running from a checkout, or for a frozen copy
-whose recorded source folder is still there and whose settings say
-`updateFrom: "source"` (Settings → Updates, shown only then as
-`sourceChoice`).
-
-Release mode (`selfupdate.py`, inside the app): `.github/workflows/release.yml`
+Updates (`selfupdate.py`, inside the app; every frozen copy, `App.update_mode()`;
+running from source has none): `.github/workflows/release.yml`
 builds `LinkTest-win64.exe` on windows-latest for every VERSION on main that
 has no `v<VERSION>` release yet, smoke-tests it (`--no-open`, `/api/ping`
 must report the version), and publishes it with `release.json` and
@@ -68,30 +63,16 @@ single-instance check) and quits; the new one deletes `<exe>.old`.
 `/api/update/status.progress` carries {phase: download|install|restart|error,
 done, total} for the UI. `LINKTEST_UPDATE_URL` points tests at a local copy.
 
-Source mode (`updater.py` + `update_gui.py`, run from the source folder with the
-build Python, outside the app because the update closes it):
-
-```
-App.start_update ──spawn──> update_gui.py (Tk progress) ──> updater.py
-                                     git fetch + ff-only ─> pip (if requirements changed)
-                                     POST /api/quit to the app, wait for its pid (kill after 20 s)
-                                     build.py ─> dist/<tag>/LinkTest[.exe] + build.json
-                                     copy over the exe that asked (--exe), start it
-```
-
-`build.py` writes `build_info.json` (commit, branch, source folder, build
-Python) into the bundle; `build_info()` reads it (or git when run from source)
-and `App.updater()` says whether an update is possible. `/api/update/check`
-runs `updater.py --check --json` (cached 10 min); `update_loop` checks 3 s
-after launch and every 30 min (the header's pulsing Update now button). Status carries `prompt: true` after a launch
-check found an update and no window has asked yet; the UI then shows the
-Update now / Skip for now dialog and posts `/api/update/prompted`. Programs
-the app starts get `clean_env()`: a frozen LinkTest's `_PYI_*` and
+`update_loop` checks 3 s after launch and every 30 min (cached 10 min for
+on-demand checks); the header's pulsing Update now button shows while one is
+waiting. Status carries `prompt: true` after a launch check found an update
+and no window has asked yet; the UI then shows the Update now / Skip for now
+dialog and posts `/api/update/prompted`. The restarted exe gets `clean_env()`
+plus `PYINSTALLER_RESET_ENVIRONMENT=1`: a frozen LinkTest's `_PYI_*` and
 `LD_LIBRARY_PATH` point at its own unpack folder, and a LinkTest started with
-them refuses to run ("Security validation failure"); `updater.py` strips
-them again and waits for the restarted app to answer `/api/ping`. `/api/update/start` and `/api/quit` refuse requests with a
-foreign `Origin`. Lock: `dist/update.lock`; log of the last update:
-`dist/update.log`.
+them refuses to run ("Security validation failure"). `/api/update/start` and
+`/api/quit` refuse requests with a foreign `Origin`. `build.py` bundles
+`build_info.json` (version, commit, branch) shown in Settings.
 
 ## 2. Modules
 
@@ -113,8 +94,6 @@ foreign `Origin`. Lock: `dist/update.lock`; log of the last update:
 | `tray.py` | System-tray icon (pystray): Open / Update / Quit menu, `ok` only when really docked; X11 click fix. |
 | `selfupdate.py` | Release-mode update (copies without a source folder): read `release.json` from the latest GitHub release, download + SHA-256 check, rename the running exe aside, put the new one in place. |
 | `tools/release_info.py` | For the release workflow: VERSION, `release.json` (changes per version from CHANGELOG, asset SHA-256), notes, SHA256SUMS. |
-| `updater.py` | Update from GitHub: fetch + fast-forward the followed branch, pip when requirements changed, close the app (`/api/quit`), `build.py`, copy over the exe that asked, restart; `--check --json` for the app. |
-| `update_gui.py` | Tk progress window around `updater.py` (status line, bar, details log, run in background); silent fallback without Tk. |
 | `build.py` | PyInstaller one-file build for the current platform; `--wsl` runs the Linux build inside WSL; on macOS emits `LinkTest.app` + zip (`finish_mac_bundle` patches Info.plist and ad-hoc signs). `build-mac.sh` wraps venv + fetch + build; `MACOS.md` documents it. |
 | `tools/` | Dev aids: `fake_iperf3.py` (+ `make_fake.py`), `make_icon.py`. |
 
@@ -147,7 +126,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 | `/api/scan/start {range, ports, …}`, `/api/scan/stop` | POST | Scanner control |
 | `/api/scan/events?since`, `/api/scan/state`, `/api/scan/csv` | GET | Scanner stream (`start`, `host`, `detail`, `progress`, `intercept {ports, phase}`, `arp`, `done`) / rehydrate (includes `intercepted`) / export |
 | `/api/update/status` | GET | Build (version, commit, branch, frozen), whether it can update and why not, last check result, tray state and options |
-| `/api/update/check` | POST | Run `updater.py --check` now; returns the same as status |
+| `/api/update/check` | POST | Check the latest GitHub release now; returns the same as status |
 | `/api/clipboard` | POST | System clipboard text for the right-click Paste (Windows clipboard API, pbpaste, wl-paste / xclip / xsel). Only with `X-LinkTest: 1`, a same-origin or missing Origin and Host 127.0.0.1 / localhost |
 | `/api/update/prompted` | POST | The launch prompt was answered; status stops returning `prompt: true` until the next launch |
 | `/api/update/start` | POST | Start the update (progress window; the app is closed and restarted by it). Same-origin only |
@@ -180,7 +159,7 @@ The UI never touches the OS; it calls the local JSON API. Two patterns:
 
 | Path | Content |
 |---|---|
-| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `updateFrom` ("release" default / "source"), `trayMinimize` (default on), `trayClose` (default off), `trayHintShown`, `updateCheck` (default on). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
+| `settings.json` | `lastOpts` (speed test), `recentHosts` (last 5 speed-test servers), `iperfPath` (dev override), `lastTab`, `scanRange`, `scanPorts`, `scanOpts`, `pingTargets` `[{id, host, label, interval, timeoutMs, paused, muted, hopsOn, collapsed, order}]`, `pingRetentionDays` (30), `pingOutageThreshold` (3), `dnsCustomServers`, `dnsLastType` | `wifiFilters` + `wifiShowStale` (Wi‑Fi tab filters), `collapsed {key: bool}` (collapsible cards, keys like `scan.devices`). `trayMinimize` (default on), `trayClose` (default off), `trayHintShown`, `updateCheck` (default on). `window: {width, height, x, y, maximized}` is written by the native window's resized/moved/maximized/restored/closing events (debounced) and restored by `open_native_window`.
 | `history.json` | Speed-test results (≤ 300), each `{id, ts, label?, mode, opts, cmd, summary, intervals, iperfVersion, host}` |
 | `pings/<targetId>/<YYYY-MM-DD>.csv` | `ts,rtt_ms,status` per sample; written every 5 s; pruned after `pingRetentionDays` |
 | `captures/<id>.pcapng` + `captures.json` | Recordings and their index (name, connection, filter, times, counts); `<id>.meta.json` / `<id>.stop` are the helper's status and stop-flag files |
@@ -212,7 +191,7 @@ tools/make_icon.py ------------------------>  assets/linktest.{ico,png}   (commi
 build.py  (per platform; --wsl for Linux from Windows)
    PyInstaller --onefile --add-data ui --add-data assets --add-binary bin/<tag>/*
    -> dist/win64/LinkTest.exe (~20 MB)   dist/linux-x86_64/LinkTest (~240 MB, QtWebEngine)
-   + VERSION.txt + THIRD-PARTY-LICENSES.txt + build.json + "Update LinkTest.cmd" / update-linktest.sh
+   + VERSION.txt + THIRD-PARTY-LICENSES.txt + build.json
    build_info.json (commit, branch, source folder, build Python) is bundled for the updater
 ```
 

@@ -32,7 +32,7 @@ import pcaptool as pc
 import wifiscan as ws
 
 APP_NAME = "LinkTest"
-VERSION = "0.14.3"
+VERSION = "0.14.4"
 IS_WIN = os.name == "nt"
 IS_LINUX = sys.platform.startswith("linux")
 IS_MAC = sys.platform == "darwin"
@@ -365,7 +365,7 @@ class App:
         return False
 
     def quit(self) -> None:
-        """Quit for real (tray menu, About, the updater)."""
+        """Quit for real (tray menu, Settings)."""
         self._quitting = True
         if self.windowed and self.windows:
             for w in list(self.windows):
@@ -378,66 +378,24 @@ class App:
             self.shutdown()
 
     # -- updates -----------------------------------------------------------------
-    def updater(self) -> tuple[str | None, str]:
-        """(build Python, source folder) that can update this LinkTest, or (None, why not)."""
-        b = build_info()
-        src, py = b.get("source") or "", b.get("python") or ""
-        if not src or not os.path.isfile(os.path.join(src, "updater.py")):
-            return None, ("This copy of LinkTest was not built with the updater. Build it once from the "
-                          "source folder (python build.py); after that it can update itself.")
-        if not os.path.isdir(os.path.join(src, ".git")):
-            return None, f"The source folder {src} is not a git checkout, so there is nothing to pull."
-        if not py or not os.path.isfile(py):
-            return None, (f"The Python that built LinkTest ({py or 'unknown'}) is no longer there. "
-                          "Build once with python build.py to refresh it.")
-        return py, src
-
     def update_mode(self) -> tuple[str | None, str]:
-        """How this copy updates: "release" (download the ready-made GitHub release: every built
-        copy, by default), "source" (pull + rebuild in the folder it was built from: running from
-        source, or a built copy whose owner chose it in Settings), or (None, why not)."""
-        py, why = self.updater()
+        """("release", "") for every built copy: updates are the ready-made GitHub releases,
+        downloaded and swapped in by LinkTest itself (selfupdate.py). Running from source has no
+        exe to swap: (None, why)."""
         if getattr(sys, "frozen", False):
-            if py and self.settings.get("updateFrom") == "source":
-                return "source", ""
             return "release", ""
-        if py:
-            return "source", ""
-        return None, why
+        return None, "LinkTest is running from source (python linktest.py): update it with git pull."
 
     def check_update(self, force: bool = False) -> dict:
         mode, why = self.update_mode()
         if mode is None:
             return {"error": why}
-        if mode == "release":
-            with self._update_lock:
-                info = self.update_info
-                if info and not force and time.time() - info.get("checkedAt", 0) < 600:
-                    return info
-                import selfupdate
-                info = selfupdate.check(VERSION, ir.plat_tag())
-                info["checkedAt"] = time.time()
-                self.update_info = info
-            if self.tray:
-                self.tray.refresh()
-            return info
-        py, src = self.updater()
         with self._update_lock:
             info = self.update_info
             if info and not force and time.time() - info.get("checkedAt", 0) < 600:
                 return info
-            cmd = [py, os.path.join(src, "updater.py"), "--check", "--json"]
-            if build_info().get("commit"):
-                cmd += ["--have", build_info()["commit"]]
-            try:
-                r = subprocess.run(cmd, cwd=src, env=clean_env(), capture_output=True, text=True, timeout=120,
-                                   creationflags=NO_WINDOW)
-                lines = [ln for ln in (r.stdout or "").splitlines() if ln.startswith("{")]
-                info = json.loads(lines[-1]) if lines else {"error": (r.stderr or r.stdout or "no answer").strip()[-400:]}
-            except subprocess.TimeoutExpired:
-                info = {"error": "Checking took too long (is GitHub reachable?)."}
-            except (OSError, ValueError) as e:
-                info = {"error": f"Could not run the update check: {e}"}
+            import selfupdate
+            info = selfupdate.check(VERSION, ir.plat_tag())
             info["checkedAt"] = time.time()
             self.update_info = info
         if self.tray:
@@ -450,29 +408,7 @@ class App:
             if self.tray:
                 self.tray.notify(why)
             return {"error": why}
-        if mode == "release":
-            return self.start_release_update()
-        py, src = self.updater()
-        gui_py = py
-        if IS_WIN and os.path.basename(py).lower() == "python.exe":
-            alt = os.path.join(os.path.dirname(py), "pythonw.exe")
-            gui_py = alt if os.path.isfile(alt) else py
-        cmd = [gui_py, os.path.join(src, "update_gui.py"), "--pid", str(os.getpid())]
-        if self.server:
-            cmd += ["--port", str(self.server.server_address[1])]
-        if build_info().get("commit"):
-            cmd += ["--have", build_info()["commit"]]
-        cmd += ["--exe", sys.executable] if getattr(sys, "frozen", False) else ["--source"]
-        quiet = dict(cwd=src, env=clean_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL)
-        try:
-            if IS_WIN:
-                subprocess.Popen(cmd, creationflags=0x00000008 | 0x00000200, **quiet)  # detached, own group
-            else:
-                subprocess.Popen(cmd, start_new_session=True, **quiet)
-        except OSError as e:
-            return {"error": f"Could not start the updater: {e}"}
-        return {"ok": True}
+        return self.start_release_update()
 
     def start_release_update(self) -> dict:
         """Download the GitHub release, swap the executable and restart, all inside LinkTest."""
@@ -678,8 +614,6 @@ class Handler(BaseHTTPRequestHandler):
         return {"version": VERSION, "commit": (b.get("commit") or "")[:7], "branch": b.get("branch") or "",
                 "frozen": bool(b.get("frozen")), "built": b.get("built"), "source": b.get("source") or "",
                 "canUpdate": py, "mode": mode, "why": why, "info": app.update_info,
-                # a built copy that still has its source folder may choose to rebuild from it
-                "sourceChoice": bool(getattr(sys, "frozen", False) and app.updater()[0]),
                 "progress": app.update_progress,
                 "tray": app.tray_ok(), "trayMenu": bool(app.tray and app.tray.has_menu), "windowed": app.windowed,
                 "trayMinimize": app.settings.get("trayMinimize", True), "trayClose": bool(app.settings.get("trayClose")),
@@ -876,8 +810,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"cmd": ir.quote_cmd([os.path.basename(exe)] + args)})
             if p == "/api/settings":
                 patch = body.get("patch") or {}
-                if "updateFrom" in patch and patch["updateFrom"] != app.settings.get("updateFrom"):
-                    app.update_info = None          # the last check was for the other source
                 app.settings.update(patch)
                 app.save_settings()
                 return self._json({"settings": app.settings})

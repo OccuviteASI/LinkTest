@@ -3,6 +3,14 @@
 All notable changes to LinkTest. The version number is defined once, in
 `linktest.py` (`VERSION`), and read by the UI and `build.py`.
 
+## 0.14.4 - 2026-11-17
+
+- Updates are always the ready-made download from GitHub. The Settings
+  option to rebuild from the source folder is gone, and so is the
+  pull-and-rebuild updater behind it (updater.py, its progress window and
+  the "Update LinkTest.cmd" next to local builds). Running from source
+  (python linktest.py) no longer updates itself; use git pull.
+
 ## 0.14.3 - 2026-11-17
 
 - Settings → Updates has a "See all releases" link to the GitHub releases
